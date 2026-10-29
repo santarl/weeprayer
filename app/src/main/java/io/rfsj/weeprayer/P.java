@@ -66,9 +66,23 @@ final class P {
         return Instant.ofEpochMilli(ms).atZone(Z).format(DateTimeFormatter.ofPattern("HH:mm"));
     }
 
+    private static String p2(long x) { return x < 10 ? "0" + x : "" + x; }
+
+    /** Time left with seconds: "1h 12m 05s", "12m 05s", "5s". */
     static String left(long ms) {
-        long m = ms / 60000;
-        return m < 1 ? "<1m" : m < 60 ? m + "m" : m / 60 + "h " + m % 60 + "m";
+        long s = Math.max(0, ms / 1000), h = s / 3600, m = s / 60 % 60;
+        if (h > 0) return h + "h " + p2(m) + "m " + p2(s % 60) + "s";
+        if (m > 0) return m + "m " + p2(s % 60) + "s";
+        return s + "s";
+    }
+
+    /** Prayer name; Dhuhr is Jumu'ah on Fridays. */
+    static String name(int i, LocalDate d) {
+        return i == 1 && d.getDayOfWeek() == java.time.DayOfWeek.FRIDAY ? "Jumu'ah" : N[i];
+    }
+
+    static String nameAt(int i, long ms) {
+        return name(i, Instant.ofEpochMilli(ms).atZone(Z).toLocalDate());
     }
 
     /**

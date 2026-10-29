@@ -89,7 +89,7 @@ public class M extends Activity {
     static void schedule(Context c) {
         long now = System.currentTimeMillis();
         long[] e = fresh(c) ? P.next(lines(c), now) : null;
-        if (e != null) arm(c, e[0], (int) e[1], P.N[(int) e[2]], e[3]);
+        if (e != null) arm(c, e[0], (int) e[1], P.nameAt((int) e[2], e[3]), e[3]);
         else if (fresh(c)) // month finished: refresh just after midnight on the 1st
             arm(c, ym().plusMonths(1).atDay(1).atTime(0, 10).atZone(P.Z).toInstant().toEpochMilli(), 2, "", 0);
         else arm(c, now + 3600_000L, 2, "", 0); // no data for this month: try again in an hour
@@ -145,7 +145,7 @@ public class M extends Activity {
         f.setPadding(48, 120, 48, 48);
         f.addView(btn("< back", v -> back()));
         f.addView(tog("h12", false, "time format", "12h", "24h"));
-        f.addView(tog("l3", true, "last third of the night", "shown", "hidden"));
+        f.addView(tog("l3", false, "last third of the night", "shown", "hidden"));
         f.addView(btn("refresh now", v -> new Thread(() -> { refresh(this); schedule(this); runOnUiThread(this::draw); }).start()));
         f.addView(btn("test timer in 10 s (go to home screen)", v -> {
             long n = System.currentTimeMillis();
@@ -185,7 +185,7 @@ public class M extends Activity {
     }
 
     final Runnable tick = new Runnable() {
-        @Override public void run() { draw(); t.postDelayed(this, 20000); }
+        @Override public void run() { draw(); t.postDelayed(this, 1000); }
     };
 
     @Override protected void onResume() { super.onResume(); t.removeCallbacks(tick); t.post(tick); }
@@ -212,11 +212,11 @@ public class M extends Activity {
         if (r != null) {
             int nx = 5;
             for (int i = 4; i >= 0; i--) if (P.at(d, r[i + 1]) > now) nx = i;
-            for (int i = 0; i < 5; i++) s.append(line(i == nx, P.N[i], r[i + 1], P.at(d, r[i + 1]), now));
+            for (int i = 0; i < 5; i++) s.append(line(i == nx, P.name(i, d), r[i + 1], P.at(d, r[i + 1]), now));
             String[] n = P.row(l, d.plusDays(1));
-            if (nx == 5 && n != null) s.append(line(true, P.N[0], n[1], P.at(d.plusDays(1), n[1]), now));
+            if (nx == 5 && n != null) s.append(line(true, P.name(0, d.plusDays(1)), n[1], P.at(d.plusDays(1), n[1]), now));
             long q = P.lastThird(l, now);
-            if (q != 0 && sp(this).getBoolean("l3", true)) s.append('\n').append(line(false, "Last 1/3", P.hm(q), q, now));
+            if (q != 0 && sp(this).getBoolean("l3", false)) s.append('\n').append(line(false, "Last 1/3", P.hm(q), q, now));
         } else s.append(fresh(this) ? "no times for today" : "no data for " + ym());
         t.setText(s.toString().replaceAll("\\s+$", ""));
         SharedPreferences p = sp(this);
