@@ -11,7 +11,7 @@ public class T extends BroadcastReceiver {
             if (k == 2) { // monthly refresh (or retry)
                 final PendingResult r = goAsync();
                 new Thread(() -> {
-                    try { M.refresh(c); M.schedule(c); } finally { r.finish(); }
+                    try { M.refresh(c); M.after(c); } finally { r.finish(); }
                 }).start();
                 return;
             }
@@ -29,6 +29,6 @@ public class T extends BroadcastReceiver {
                 else M.timer(c, n + " +10", 600);
             }
         }
-        M.schedule(c); // boot, time change, or just fired: set the next alarm
+        M.after(c); // boot, time change, or just fired: set the next alarm and redraw widgets
     }
 }

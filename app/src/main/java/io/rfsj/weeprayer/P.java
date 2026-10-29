@@ -104,11 +104,35 @@ final class P {
         return m + (f - m) * 2 / 3;
     }
 
-    /** Next event after now: {fireAt, kind (0 = 20 min before, 1 = azaan), prayer index, prayer time}, or null. */
+    /**
+     * Display state for today: {current prayer (the last one started; Isha before Fajr),
+     * next prayer index (tomorrow's Fajr after Isha, -1 if unknown), its time}, or null.
+     */
+    static long[] state(List<String> lines, long now) {
+        LocalDate d = Instant.ofEpochMilli(now).atZone(Z).toLocalDate();
+        String[] r = row(lines, d);
+        if (r == null) return null;
+        int cur = 4, nx = -1;
+        long nt = 0;
+        for (int i = 0; i < 5; i++) {
+            long t = at(d, r[i + 1]);
+            if (t <= now) cur = i;
+            else if (nx < 0) { nx = i; nt = t; }
+        }
+        if (nx < 0) {
+            String[] n = row(lines, d.plusDays(1));
+            if (n != null) { nx = 0; nt = at(d.plusDays(1), n[1]); }
+        }
+        return new long[]{cur, nx, nt};
+    }
+
+    /** Next event after now: {fireAt, kind (0 = 20 min before, 1 = azaan, 3 = new day), prayer index, prayer time}, or null. */
     static long[] next(List<String> lines, long now) {
         for (String l : lines) {
             String[] f = l.split(",");
             LocalDate d = LocalDate.parse(f[0]);
+            long mid = d.atStartOfDay(Z).toInstant().toEpochMilli() + 5000; // new day: refresh widgets
+            if (mid > now) return new long[]{mid, 3, 0, 0};
             for (int i = 0; i < 5; i++) {
                 long t = at(d, f[i + 1]);
                 if (t - PRE > now) return new long[]{t - PRE, 0, i, t};

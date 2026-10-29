@@ -103,6 +103,12 @@ public class M extends Activity {
         else arm(c, now + 3600_000L, 2, "", 0); // no data for this month: try again in an hour
     }
 
+    /** After anything changed: set the next alarm and redraw the widgets. */
+    static void after(Context c) {
+        schedule(c);
+        W.all(c);
+    }
+
     // ---------- Clock app timer ----------
     static void timer(Context c, String label, int secs) {
         String err = "";
@@ -132,6 +138,13 @@ public class M extends Activity {
                 .setAutoCancel(true)
                 .setContentIntent(PendingIntent.getActivity(c, 0, new Intent(c, M.class), PendingIntent.FLAG_IMMUTABLE));
         nm.notify(id, b.build());
+    }
+
+    /** Widget time: like the app's, but 12h without AM/PM and with a leading zero. */
+    static String fw(Context c, String hm) {
+        if (!on(c, "h12", false)) return hm;
+        int h = Integer.parseInt(hm.substring(0, 2)) % 12;
+        return (h == 0 ? "12" : h < 10 ? "0" + h : "" + h) + hm.substring(2);
     }
 
     static String fmt(Context c, String hm) {
@@ -181,7 +194,11 @@ public class M extends Activity {
         f.addView(chk("tp", true, "prayer timer (starts 20 min before)"));
         f.addView(chk("ti", true, "iqama timer (10 min from azaan)"));
         f.addView(chk("nt", false, "notification instead of timer"));
-        f.addView(btn("refresh now", v -> new Thread(() -> { refresh(this); schedule(this); runOnUiThread(this::draw); }).start()));
+        f.addView(lab("widget (12-hour time above applies too)"));
+        f.addView(chk("wl3", false, "show last third of the night"));
+        f.addView(chk("wcd", true, "show countdown to the next prayer"));
+        f.addView(lab("tools"));
+        f.addView(btn("refresh now", v -> new Thread(() -> { refresh(this); after(this); runOnUiThread(this::draw); }).start()));
         f.addView(btn("test timer in 10 s (go to home screen)", v -> {
             long n = System.currentTimeMillis();
             arm(this, n + 10000, 0, "Test", n + 40000); // fires from the background, 30 s timer
@@ -197,12 +214,12 @@ public class M extends Activity {
         setContentView(mainV);
         new Thread(() -> {
             if (!fresh(this)) refresh(this);
-            schedule(this);
+            after(this);
             runOnUiThread(this::draw);
         }).start();
     }
 
-    void back() { inConf = false; setContentView(mainV); draw(); }
+    void back() { inConf = false; setContentView(mainV); draw(); W.all(this); }
 
     @Override public void onBackPressed() { if (inConf) back(); else super.onBackPressed(); }
 
@@ -222,8 +239,17 @@ public class M extends Activity {
         b.setOnCheckedChangeListener((v, isOn) -> {
             sp(this).edit().putBoolean(key, isOn).apply();
             if (isOn && key.equals("nt")) askNotif();
+            W.all(this);
         });
         return b;
+    }
+
+    TextView lab(String s) {
+        TextView x = new TextView(this);
+        x.setText(s);
+        x.setTextColor(0xFF666666);
+        x.setPadding(0, 48, 0, 8);
+        return x;
     }
 
     void askNotif() {
