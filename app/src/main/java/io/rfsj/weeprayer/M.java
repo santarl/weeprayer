@@ -12,7 +12,9 @@ import android.os.Bundle;
 import android.provider.AlarmClock;
 import android.provider.Settings;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -20,6 +22,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
@@ -31,8 +34,10 @@ public class M extends Activity {
     static final String UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36";
     static final String EVT = "io.rfsj.weeprayer.EVT";
 
-    TextView t;
+    TextView t, st;
     Button ov;
+    View mainV, confV;
+    boolean inConf;
 
     // ---------- storage ----------
     static SharedPreferences sp(Context c) { return c.getSharedPreferences("p", 0); }
@@ -109,28 +114,49 @@ public class M extends Activity {
         getWindow().setStatusBarColor(0xFF000000);
         getWindow().setNavigationBarColor(0xFF000000);
 
-        LinearLayout f = new LinearLayout(this);
-        f.setOrientation(LinearLayout.VERTICAL);
-        f.setBackgroundColor(0xFF000000);
-        f.setPadding(48, 96, 48, 48);
-
+        // main screen: times centred, "config" top left
         t = new TextView(this);
         t.setTextColor(0xFFFFFFFF);
         t.setTextSize(22);
         t.setTypeface(android.graphics.Typeface.MONOSPACE);
-        f.addView(t);
+        st = new TextView(this);
+        st.setTextColor(0xFF666666);
+        st.setTextSize(12);
+        st.setPadding(0, 48, 0, 0);
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.addView(t);
+        c.addView(st);
+        TextView cf = new TextView(this);
+        cf.setText("config");
+        cf.setTextColor(0xFF666666);
+        cf.setPadding(48, 120, 96, 48);
+        cf.setOnClickListener(v -> { inConf = true; setContentView(confV); draw(); });
+        FrameLayout m = new FrameLayout(this);
+        m.setBackgroundColor(0xFF000000);
+        m.addView(c, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        m.addView(cf, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START));
+        mainV = m;
 
+        // config screen
+        LinearLayout f = new LinearLayout(this);
+        f.setOrientation(LinearLayout.VERTICAL);
+        f.setBackgroundColor(0xFF000000);
+        f.setPadding(48, 120, 48, 48);
+        f.addView(btn("< back", v -> back()));
+        f.addView(tog("h12", false, "time format", "12h", "24h"));
+        f.addView(tog("l3", true, "last third of the night", "shown", "hidden"));
         f.addView(btn("refresh now", v -> new Thread(() -> { refresh(this); schedule(this); runOnUiThread(this::draw); }).start()));
         f.addView(btn("test timer in 10 s (go to home screen)", v -> {
             long n = System.currentTimeMillis();
             arm(this, n + 10000, 0, "Test", n + 40000); // fires from the background, 30 s timer
-            draw();
         }));
         ov = btn("allow display over other apps", v -> startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:" + getPackageName()))));
         f.addView(ov);
-        setContentView(f);
+        confV = f;
 
+        setContentView(mainV);
         new Thread(() -> {
             if (!fresh(this)) refresh(this);
             schedule(this);
@@ -138,7 +164,11 @@ public class M extends Activity {
         }).start();
     }
 
-    Button btn(String s, android.view.View.OnClickListener l) {
+    void back() { inConf = false; setContentView(mainV); draw(); }
+
+    @Override public void onBackPressed() { if (inConf) back(); else super.onBackPressed(); }
+
+    Button btn(String s, View.OnClickListener l) {
         Button x = new Button(this);
         x.setText(s);
         x.setAllCaps(false);
@@ -146,21 +176,53 @@ public class M extends Activity {
         return x;
     }
 
-    @Override protected void onResume() { super.onResume(); draw(); }
+    Button tog(final String key, final boolean def, final String label, final String on, final String off) {
+        final Button b = btn("", null);
+        final Runnable sync = () -> b.setText(label + ": " + (sp(this).getBoolean(key, def) ? on : off));
+        sync.run();
+        b.setOnClickListener(v -> { sp(this).edit().putBoolean(key, !sp(this).getBoolean(key, def)).apply(); sync.run(); });
+        return b;
+    }
+
+    final Runnable tick = new Runnable() {
+        @Override public void run() { draw(); t.postDelayed(this, 20000); }
+    };
+
+    @Override protected void onResume() { super.onResume(); t.removeCallbacks(tick); t.post(tick); }
+
+    @Override protected void onPause() { super.onPause(); t.removeCallbacks(tick); }
+
+    String fmt(String hm) {
+        if (!sp(this).getBoolean("h12", false)) return hm;
+        int h = Integer.parseInt(hm.substring(0, 2));
+        return (h % 12 == 0 ? 12 : h % 12) + hm.substring(2) + (h < 12 ? " AM" : " PM");
+    }
+
+    String line(boolean next, String name, String hm, long target, long now) {
+        return String.format(java.util.Locale.ROOT, "%s%-8s%8s", next ? "> " : "  ", name, fmt(hm))
+                + (next ? "  (" + P.left(target - now) + ")" : "") + "\n";
+    }
 
     void draw() {
+        List<String> l = lines(this);
+        long now = System.currentTimeMillis();
+        LocalDate d = Instant.ofEpochMilli(now).atZone(P.Z).toLocalDate();
+        String[] r = P.row(l, d);
         StringBuilder s = new StringBuilder();
-        String today = LocalDate.now(P.Z).toString();
-        for (String l : lines(this)) {
-            if (!l.startsWith(today)) continue;
-            String[] f = l.split(",");
-            for (int i = 0; i < 5; i++) s.append(String.format("%-8s%s\n", P.N[i], f[i + 1]));
-        }
+        if (r != null) {
+            int nx = 5;
+            for (int i = 4; i >= 0; i--) if (P.at(d, r[i + 1]) > now) nx = i;
+            for (int i = 0; i < 5; i++) s.append(line(i == nx, P.N[i], r[i + 1], P.at(d, r[i + 1]), now));
+            String[] n = P.row(l, d.plusDays(1));
+            if (nx == 5 && n != null) s.append(line(true, P.N[0], n[1], P.at(d.plusDays(1), n[1]), now));
+            long q = P.lastThird(l, now);
+            if (q != 0 && sp(this).getBoolean("l3", true)) s.append('\n').append(line(false, "Last 1/3", P.hm(q), q, now));
+        } else s.append(fresh(this) ? "no times for today" : "no data for " + ym());
+        t.setText(s.toString().replaceAll("\\s+$", ""));
         SharedPreferences p = sp(this);
-        s.append('\n').append(fresh(this) ? "data: " + ym() : "no data for " + ym());
-        if (!p.getString("e", "").isEmpty()) s.append("\nfetch: ").append(p.getString("e", ""));
-        if (!p.getString("te", "").isEmpty()) s.append("\n").append(p.getString("te", ""));
-        t.setText(s);
-        ov.setVisibility(Settings.canDrawOverlays(this) ? android.view.View.GONE : android.view.View.VISIBLE);
+        String e = p.getString("e", ""), te = p.getString("te", "");
+        st.setText((e.isEmpty() ? "" : "fetch: " + e + "\n") + te);
+        st.setVisibility(e.isEmpty() && te.isEmpty() ? View.GONE : View.VISIBLE);
+        ov.setVisibility(Settings.canDrawOverlays(this) ? View.GONE : View.VISIBLE);
     }
 }
