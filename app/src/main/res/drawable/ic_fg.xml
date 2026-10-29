@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- crescent -->
+    <path
+        android:fillColor="#FF00E676"
+        android:pathData="M60,30A26,26 0 1,0 60,78A30,30 0 0,1 60,30Z"/>
+    <!-- star -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M72,42a4,4 0 1,0 8,0a4,4 0 1,0 -8,0Z"/>
+</vector>
