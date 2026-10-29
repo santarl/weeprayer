@@ -13,6 +13,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.provider.AlarmClock;
 import android.provider.Settings;
 import android.view.Gravity;
@@ -41,7 +42,7 @@ public class M extends Activity {
     static final String EVT = "io.rfsj.weeprayer.EVT";
 
     TextView t, st;
-    Button ov;
+    Button ov, bat;
     View mainV, confV;
     boolean inConf;
 
@@ -107,6 +108,21 @@ public class M extends Activity {
     static void after(Context c) {
         schedule(c);
         W.all(c);
+        keep(c);
+    }
+
+    // ---------- keep-alive foreground notification (own channel; hide it in Android's settings) ----------
+    static void keepChannel(Context c) {
+        c.getSystemService(NotificationManager.class)
+                .createNotificationChannel(new NotificationChannel("keep", "Keep-alive (hide this one)", NotificationManager.IMPORTANCE_MIN));
+    }
+
+    static void keep(Context c) {
+        try {
+            Intent i = new Intent(c, S.class);
+            if (on(c, "ka", false)) c.startForegroundService(i);
+            else c.stopService(i);
+        } catch (Exception e) { sp(c).edit().putString("te", "keep-alive: " + e).apply(); }
     }
 
     // ---------- Clock app timer ----------
@@ -194,6 +210,7 @@ public class M extends Activity {
         f.addView(chk("tp", true, "prayer timer (starts 20 min before)"));
         f.addView(chk("ti", true, "iqama timer (10 min from azaan)"));
         f.addView(chk("nt", false, "notification instead of timer"));
+        f.addView(chk("ka", false, "keep-alive notification (own channel, can be hidden)"));
         f.addView(lab("widget (12-hour time above applies too)"));
         f.addView(chk("wl3", false, "show last third of the night"));
         f.addView(chk("wcd", true, "show countdown to the next prayer"));
@@ -202,6 +219,16 @@ public class M extends Activity {
         f.addView(btn("test timer in 10 s (go to home screen)", v -> {
             long n = System.currentTimeMillis();
             arm(this, n + 10000, 0, "Test", n + 40000); // fires from the background, 30 s timer
+        }));
+        bat = btn("", v -> startActivity(ignoring()
+                ? new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                : new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()))));
+        f.addView(bat);
+        f.addView(btn("keep-alive notification settings", v -> {
+            keepChannel(this);
+            startActivity(new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName())
+                    .putExtra(Settings.EXTRA_CHANNEL_ID, "keep"));
         }));
         ov = btn("allow display over other apps", v -> startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:" + getPackageName()))));
@@ -218,6 +245,8 @@ public class M extends Activity {
             runOnUiThread(this::draw);
         }).start();
     }
+
+    boolean ignoring() { return getSystemService(PowerManager.class).isIgnoringBatteryOptimizations(getPackageName()); }
 
     void back() { inConf = false; setContentView(mainV); draw(); W.all(this); }
 
@@ -238,7 +267,8 @@ public class M extends Activity {
         b.setChecked(on(this, key, def));
         b.setOnCheckedChangeListener((v, isOn) -> {
             sp(this).edit().putBoolean(key, isOn).apply();
-            if (isOn && key.equals("nt")) askNotif();
+            if (isOn && (key.equals("nt") || key.equals("ka"))) askNotif();
+            if (key.equals("ka")) keep(this);
             W.all(this);
         });
         return b;
@@ -290,6 +320,7 @@ public class M extends Activity {
         String e = p.getString("e", ""), te = p.getString("te", "");
         st.setText((e.isEmpty() ? "" : "fetch: " + e + "\n") + te);
         st.setVisibility(e.isEmpty() && te.isEmpty() ? View.GONE : View.VISIBLE);
+        bat.setText(ignoring() ? "battery: unoptimized (tap to review)" : "set battery to unoptimized");
         ov.setVisibility(Settings.canDrawOverlays(this) ? View.GONE : View.VISIBLE);
     }
 }
