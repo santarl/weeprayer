@@ -2,10 +2,14 @@ package io.rfsj.weeprayer;
 
 import android.app.Activity;
 import android.app.AlarmManager;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -14,8 +18,10 @@ import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.ByteArrayOutputStream;
@@ -41,6 +47,8 @@ public class M extends Activity {
 
     // ---------- storage ----------
     static SharedPreferences sp(Context c) { return c.getSharedPreferences("p", 0); }
+
+    static boolean on(Context c, String k, boolean def) { return sp(c).getBoolean(k, def); }
 
     static YearMonth ym() { return YearMonth.now(P.Z); }
 
@@ -108,6 +116,30 @@ public class M extends Activity {
         sp(c).edit().putString("te", err).putLong("tl", System.currentTimeMillis()).apply();
     }
 
+    // ---------- notification instead of a Clock timer ----------
+    static void remind(Context c, int id, String title, String text, long target) {
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        nm.createNotificationChannel(new NotificationChannel("rem", "Prayer reminders", NotificationManager.IMPORTANCE_LOW));
+        Notification.Builder b = new Notification.Builder(c, "rem")
+                .setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setWhen(target)
+                .setShowWhen(true)
+                .setUsesChronometer(true)
+                .setChronometerCountDown(true)
+                .setTimeoutAfter(Math.max(1000, target - System.currentTimeMillis()))
+                .setAutoCancel(true)
+                .setContentIntent(PendingIntent.getActivity(c, 0, new Intent(c, M.class), PendingIntent.FLAG_IMMUTABLE));
+        nm.notify(id, b.build());
+    }
+
+    static String fmt(Context c, String hm) {
+        if (!on(c, "h12", false)) return hm;
+        int h = Integer.parseInt(hm.substring(0, 2));
+        return (h % 12 == 0 ? 12 : h % 12) + hm.substring(2) + (h < 12 ? " AM" : " PM");
+    }
+
     // ---------- UI ----------
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -144,8 +176,11 @@ public class M extends Activity {
         f.setBackgroundColor(0xFF000000);
         f.setPadding(48, 120, 48, 48);
         f.addView(btn("< back", v -> back()));
-        f.addView(tog("h12", false, "time format", "12h", "24h"));
-        f.addView(tog("l3", false, "last third of the night", "shown", "hidden"));
+        f.addView(chk("h12", false, "12-hour time"));
+        f.addView(chk("l3", false, "show last third of the night"));
+        f.addView(chk("tp", true, "prayer timer (starts 20 min before)"));
+        f.addView(chk("ti", true, "iqama timer (10 min from azaan)"));
+        f.addView(chk("nt", false, "notification instead of timer"));
         f.addView(btn("refresh now", v -> new Thread(() -> { refresh(this); schedule(this); runOnUiThread(this::draw); }).start()));
         f.addView(btn("test timer in 10 s (go to home screen)", v -> {
             long n = System.currentTimeMillis();
@@ -154,7 +189,10 @@ public class M extends Activity {
         ov = btn("allow display over other apps", v -> startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:" + getPackageName()))));
         f.addView(ov);
-        confV = f;
+        ScrollView sv = new ScrollView(this);
+        sv.setBackgroundColor(0xFF000000);
+        sv.addView(f);
+        confV = sv;
 
         setContentView(mainV);
         new Thread(() -> {
@@ -176,12 +214,21 @@ public class M extends Activity {
         return x;
     }
 
-    Button tog(final String key, final boolean def, final String label, final String on, final String off) {
-        final Button b = btn("", null);
-        final Runnable sync = () -> b.setText(label + ": " + (sp(this).getBoolean(key, def) ? on : off));
-        sync.run();
-        b.setOnClickListener(v -> { sp(this).edit().putBoolean(key, !sp(this).getBoolean(key, def)).apply(); sync.run(); });
+    CheckBox chk(final String key, boolean def, String label) {
+        CheckBox b = new CheckBox(this);
+        b.setText(label);
+        b.setTextColor(0xFFFFFFFF);
+        b.setChecked(on(this, key, def));
+        b.setOnCheckedChangeListener((v, isOn) -> {
+            sp(this).edit().putBoolean(key, isOn).apply();
+            if (isOn && key.equals("nt")) askNotif();
+        });
         return b;
+    }
+
+    void askNotif() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
     }
 
     final Runnable tick = new Runnable() {
@@ -192,14 +239,8 @@ public class M extends Activity {
 
     @Override protected void onPause() { super.onPause(); t.removeCallbacks(tick); }
 
-    String fmt(String hm) {
-        if (!sp(this).getBoolean("h12", false)) return hm;
-        int h = Integer.parseInt(hm.substring(0, 2));
-        return (h % 12 == 0 ? 12 : h % 12) + hm.substring(2) + (h < 12 ? " AM" : " PM");
-    }
-
     String line(boolean next, String name, String hm, long target, long now) {
-        return String.format(java.util.Locale.ROOT, "%s%-8s%8s", next ? "> " : "  ", name, fmt(hm))
+        return String.format(java.util.Locale.ROOT, "%s%-8s%8s", next ? "> " : "  ", name, fmt(this, hm))
                 + (next ? "  (" + P.left(target - now) + ")" : "") + "\n";
     }
 

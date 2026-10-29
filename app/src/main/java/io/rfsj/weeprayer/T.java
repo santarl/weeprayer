@@ -16,9 +16,18 @@ public class T extends BroadcastReceiver {
                 return;
             }
             String n = i.getStringExtra("n");
-            // k 0: timer runs until the prayer; k 1: 10 minutes from the azaan
-            long secs = k == 0 ? (i.getLongExtra("t", 0) - System.currentTimeMillis()) / 1000 : 600;
-            if (secs >= 10) M.timer(c, k == 0 ? n : n + " +10", (int) secs);
+            long target = i.getLongExtra("t", 0), now = System.currentTimeMillis();
+            boolean notif = M.on(c, "nt", false);
+            if (k == 0 && M.on(c, "tp", true)) { // prayer timer: runs until the prayer
+                long secs = (target - now) / 1000;
+                if (secs >= 10) {
+                    if (notif) M.remind(c, 100, n, "prayer at " + M.fmt(c, P.hm(target)), target);
+                    else M.timer(c, n, (int) secs);
+                }
+            } else if (k == 1 && M.on(c, "ti", true)) { // iqama timer: 10 minutes from the azaan
+                if (notif) M.remind(c, 101, n + " iqama", "10 min from azaan", now + 600000);
+                else M.timer(c, n + " +10", 600);
+            }
         }
         M.schedule(c); // boot, time change, or just fired: set the next alarm
     }
