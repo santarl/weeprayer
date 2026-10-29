@@ -1,0 +1,32 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'io.rfsj.weeprayer'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'io.rfsj.weeprayer'
+        minSdk 26          // java.time, v1 signing dropped
+        targetSdk 35
+        versionCode 1
+        versionName '1'
+    }
+    signingConfigs {
+        release {
+            if (System.getenv('KS_PATH')) {
+                storeFile file(System.getenv('KS_PATH'))
+                storePassword System.getenv('KS_PASS')
+                keyAlias System.getenv('KS_ALIAS')
+                keyPassword System.getenv('KS_PASS')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
+            if (System.getenv('KS_PATH')) signingConfig signingConfigs.release
+        }
+    }
+    dependenciesInfo { includeInApk = false; includeInBundle = false }
+    lint { checkReleaseBuilds = false; abortOnError = false }
+}
