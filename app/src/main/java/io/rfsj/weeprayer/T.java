@@ -6,6 +6,7 @@ import android.content.Intent;
 
 public class T extends BroadcastReceiver {
     @Override public void onReceive(final Context c, Intent i) {
+        if (M.DISMISS.equals(i.getAction())) { M.dismissTimers(c); return; }
         if (M.EVT.equals(i.getAction())) {
             int k = i.getIntExtra("k", 2);
             if (k == 2) { // monthly refresh (or retry)
@@ -27,11 +28,11 @@ public class T extends BroadcastReceiver {
                 long secs = (target - now) / 1000;
                 if (secs >= 10) {
                     if (notif) M.remind(c, 100, n, (third ? "starts at " : "prayer at ") + M.fmt(c, P.hm(target)), target);
-                    else M.timer(c, n, (int) secs);
+                    else M.timer(c, n, (int) secs, 1);
                 }
             } else if (k == 1 && !third && M.on(c, "ti", true) && post > 0) { // iqama timer: `post` minutes from the azaan
                 if (notif) M.remind(c, 101, n + " iqama", post + " min from azaan", end);
-                else M.timer(c, n + " +" + post, post * 60);
+                else M.timer(c, n + " +" + post, post * 60, 2);
             }
         }
         M.after(c); // boot, time change, or just fired: set the next alarm and redraw widgets

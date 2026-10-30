@@ -101,9 +101,32 @@ public class M extends Activity {
     static void arm(Context c, long at, int kind, String name, long target, boolean third) {
         Intent i = new Intent(c, T.class).setAction(EVT).putExtra("k", kind).putExtra("n", name).putExtra("t", target).putExtra("x", third);
         PendingIntent pi = PendingIntent.getBroadcast(c, 0, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        set(c, at, pi);
+    }
+
+    static void set(Context c, long at, PendingIntent pi) {
         AlarmManager am = c.getSystemService(AlarmManager.class);
         if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
         else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
+    }
+
+    // ---------- dismissing a Clock timer that has run out ----------
+    static final String DISMISS = "io.rfsj.weeprayer.DISMISS";
+
+    /** A separate alarm (slot 1 = prayer timer, slot 2 = iqama timer) that clears the expired timer. */
+    static void armDismiss(Context c, int slot, long at) {
+        PendingIntent pi = PendingIntent.getBroadcast(c, slot, new Intent(c, T.class).setAction(DISMISS),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        set(c, at, pi);
+    }
+
+    /** Asks the Clock app to dismiss timers that have run out (not every Clock app supports it). */
+    static void dismissTimers(Context c) {
+        String err = "";
+        try {
+            c.startActivity(new Intent(AlarmClock.ACTION_DISMISS_TIMER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (Exception e) { err = "dismiss: " + e; }
+        sp(c).edit().putString("te", err).apply();
     }
 
     static void schedule(Context c) {
@@ -139,7 +162,7 @@ public class M extends Activity {
     }
 
     // ---------- Clock app timer ----------
-    static void timer(Context c, String label, int secs) {
+    static void timer(Context c, String label, int secs, int slot) {
         String err = "";
         try {
             c.startActivity(new Intent(AlarmClock.ACTION_SET_TIMER)
@@ -149,6 +172,8 @@ public class M extends Activity {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         } catch (Exception e) { err = "timer: " + e; }
         sp(c).edit().putString("te", err).putLong("tl", System.currentTimeMillis()).apply();
+        // it rings when it runs out: clear it just after that instead of waiting for a tap
+        if (err.isEmpty() && on(c, "dt", true)) armDismiss(c, slot, System.currentTimeMillis() + secs * 1000L + 2500);
     }
 
     // ---------- notification instead of a Clock timer ----------
@@ -314,6 +339,7 @@ public class M extends Activity {
         f.addView(chk("ti", true, "iqama timer (after azaan)"));
         f.addView(num("lead", 20, "start countdown (min before azaan)"));
         f.addView(num("post", 10, "keep going after azaan (min)"));
+        f.addView(chk("dt", true, "dismiss the Clock timer automatically when it runs out"));
         f.addView(chk("l3r", false, "also remind for the last third of the night (default: fard prayers only)"));
         f.addView(chk("nt", false, "notification instead of timer"));
         f.addView(chk("lu", false, "live update instead of timer (status bar chip, Now Bar)"));
