@@ -16,19 +16,20 @@ public class T extends BroadcastReceiver {
                 return;
             }
             String n = i.getStringExtra("n");
+            boolean third = i.getBooleanExtra("x", false); // the last third of the night, not a prayer
             long target = i.getLongExtra("t", 0), now = System.currentTimeMillis();
             boolean notif = M.on(c, "nt", false), live = M.on(c, "lu", false);
             int post = M.post(c);
             long end = target + post * 60000L; // when the after-azaan part ends
             if (live) { // live update: start, azaan and every-minute refreshes all redraw the same notification
-                if (k == 0 || k == 1 || k == 4) M.liveDraw(c, n, target, now);
+                if (k == 0 || k == 1 || k == 4) M.liveDraw(c, n, target, third, now);
             } else if (k == 0 && M.on(c, "tp", true)) { // prayer timer: runs until the prayer
                 long secs = (target - now) / 1000;
                 if (secs >= 10) {
-                    if (notif) M.remind(c, 100, n, "prayer at " + M.fmt(c, P.hm(target)), target);
+                    if (notif) M.remind(c, 100, n, (third ? "starts at " : "prayer at ") + M.fmt(c, P.hm(target)), target);
                     else M.timer(c, n, (int) secs);
                 }
-            } else if (k == 1 && M.on(c, "ti", true) && post > 0) { // iqama timer: `post` minutes from the azaan
+            } else if (k == 1 && !third && M.on(c, "ti", true) && post > 0) { // iqama timer: `post` minutes from the azaan
                 if (notif) M.remind(c, 101, n + " iqama", post + " min from azaan", end);
                 else M.timer(c, n + " +" + post, post * 60);
             }

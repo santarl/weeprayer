@@ -96,8 +96,8 @@ public class M extends Activity {
     }
 
     // ---------- scheduling: one alarm at a time, each firing sets the next ----------
-    static void arm(Context c, long at, int kind, String name, long target) {
-        Intent i = new Intent(c, T.class).setAction(EVT).putExtra("k", kind).putExtra("n", name).putExtra("t", target);
+    static void arm(Context c, long at, int kind, String name, long target, boolean third) {
+        Intent i = new Intent(c, T.class).setAction(EVT).putExtra("k", kind).putExtra("n", name).putExtra("t", target).putExtra("x", third);
         PendingIntent pi = PendingIntent.getBroadcast(c, 0, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         AlarmManager am = c.getSystemService(AlarmManager.class);
         if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
@@ -109,11 +109,11 @@ public class M extends Activity {
         // live update refreshed every minute: minutes left, progress and colour change as it goes
         int ticks = on(c, "lu", false) && on(c, "lp", true)
                 ? (on(c, "tp", true) ? 1 : 0) | (on(c, "ti", true) && post(c) > 0 ? 2 : 0) : 0;
-        long[] e = fresh(c) ? P.next(lines(c), now, pre(c), post(c) * 60000L, ticks) : null;
-        if (e != null) arm(c, e[0], (int) e[1], P.nameAt((int) e[2], e[3]), e[3]);
+        long[] e = fresh(c) ? P.next(lines(c), now, pre(c), post(c) * 60000L, ticks, on(c, "l3r", false)) : null;
+        if (e != null) arm(c, e[0], (int) e[1], e[2] == 5 ? "Last third" : P.nameAt((int) e[2], e[3]), e[3], e[2] == 5);
         else if (fresh(c)) // month finished: refresh just after midnight on the 1st
-            arm(c, ym().plusMonths(1).atDay(1).atTime(0, 10).atZone(P.Z).toInstant().toEpochMilli(), 2, "", 0);
-        else arm(c, now + 3600_000L, 2, "", 0); // no data for this month: try again in an hour
+            arm(c, ym().plusMonths(1).atDay(1).atTime(0, 10).atZone(P.Z).toInstant().toEpochMilli(), 2, "", 0, false);
+        else arm(c, now + 3600_000L, 2, "", 0, false); // no data for this month: try again in an hour
     }
 
     /** After anything changed: set the next alarm and redraw the widgets. */
@@ -214,15 +214,16 @@ public class M extends Activity {
     /**
      * Draws (or ends) the live update for the prayer whose azaan is at `target`, as of `now`.
      * Before the azaan: the prayer's name, counting down. After it: "Iqamah", counting up (or down).
+     * The last third of the night only has the countdown.
      */
-    static void liveDraw(Context c, String name, long target, long now) {
+    static void liveDraw(Context c, String name, long target, boolean third, long now) {
         long lead = pre(c), post = post(c) * 60000L;
         if (now < target) {
             if (!on(c, "tp", true)) { cancelLive(c); return; }
             long left = target - now;
-            live(c, name, "azaan at " + fmt(c, P.hm(target)) + " \u00b7 " + mins(left) + " left", target, true,
+            live(c, name, (third ? "starts at " : "azaan at ") + fmt(c, P.hm(target)) + " \u00b7 " + mins(left) + " left", target, true,
                     left + post + 60000, urgency(left), (int) Math.max(0, Math.min(100, (lead - left) * 100 / lead)));
-        } else if (on(c, "ti", true) && post > 0 && now < target + post) {
+        } else if (!third && on(c, "ti", true) && post > 0 && now < target + post) {
             long since = now - target, end = target + post;
             boolean up = on(c, "cu", true);
             String text = up ? (since < 60000 ? name + " \u00b7 just now" : name + " \u00b7 " + since / 60000 + " min since azaan")
@@ -289,6 +290,7 @@ public class M extends Activity {
         f.addView(chk("ti", true, "iqama timer (after azaan)"));
         f.addView(num("lead", 20, "start countdown (min before azaan)"));
         f.addView(num("post", 10, "keep going after azaan (min)"));
+        f.addView(chk("l3r", false, "also remind for the last third of the night (default: fard prayers only)"));
         f.addView(chk("nt", false, "notification instead of timer"));
         f.addView(chk("lu", false, "live update instead of timer (status bar chip, Now Bar)"));
         f.addView(chk("cu", true, "live update: count up after azaan (off: count down)"));
@@ -301,7 +303,7 @@ public class M extends Activity {
         f.addView(btn("refresh now", v -> new Thread(() -> { refresh(this); after(this); runOnUiThread(this::draw); }).start()));
         f.addView(btn("test timer in 10 s (go to home screen)", v -> {
             long n = System.currentTimeMillis();
-            arm(this, n + 10000, 0, "Test", n + 40000); // fires from the background, 30 s timer
+            arm(this, n + 10000, 0, "Test", n + 40000, false); // fires from the background, 30 s timer
         }));
         bat = btn("", v -> startActivity(ignoring()
                 ? new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)

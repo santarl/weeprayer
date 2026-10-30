@@ -130,13 +130,28 @@ final class P {
         return null;
     }
 
-    /** Next event after now: {fireAt, kind (0 = countdown starts, 1 = azaan, 3 = new day, 4 = refresh), prayer index, prayer time}, or null. */
-    static long[] next(List<String> lines, long now, long pre, long post, int ticks) {
+    /** Start of the last third of the night that ends at Fajr on day d (0 if d is not stored). */
+    static long third(List<String> lines, LocalDate d) {
+        String[] t = row(lines, d), y = row(lines, d.minusDays(1));
+        if (t == null) return 0;
+        long m = at(d.minusDays(1), (y != null ? y : t)[4]), f = at(d, t[1]);
+        return m + (f - m) * 2 / 3;
+    }
+
+    /**
+     * Next event after now: {fireAt, kind (0 = countdown starts, 1 = azaan, 3 = new day, 4 = refresh),
+     * prayer index (5 = last third of the night), prayer time}, or null.
+     */
+    static long[] next(List<String> lines, long now, long pre, long post, int ticks, boolean third) {
         for (String l : lines) {
             String[] f = l.split(",");
             LocalDate d = LocalDate.parse(f[0]);
             long mid = d.atStartOfDay(Z).toInstant().toEpochMilli() + 5000; // new day: refresh widgets
             if (mid > now) return new long[]{mid, 3, 0, 0};
+            if (third) { // the night that ends at this day's Fajr: countdown only, nothing after it starts
+                long[] e = window(now, third(lines, d), pre, 0, ticks & 1, 5);
+                if (e != null) return e;
+            }
             for (int i = 0; i < 5; i++) {
                 long[] e = window(now, at(d, f[i + 1]), pre, post, ticks, i);
                 if (e != null) return e;
