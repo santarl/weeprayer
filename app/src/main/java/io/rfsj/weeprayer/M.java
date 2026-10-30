@@ -295,8 +295,9 @@ public class M extends Activity {
     @Override protected void onPause() { super.onPause(); t.removeCallbacks(tick); }
 
     String line(boolean next, String name, String hm, long target, long now) {
-        return String.format(java.util.Locale.ROOT, "%s%-8s%8s", next ? "> " : "  ", name, fmt(this, hm))
-                + (next ? "  (" + P.left(target - now) + ")" : "") + "\n";
+        String l = String.format(java.util.Locale.ROOT, "%s%-8s%8s", next ? "> " : "  ", name, fmt(this, hm));
+        // the time left goes on its own line, right-aligned under the time
+        return l + "\n" + (next ? String.format(java.util.Locale.ROOT, "%" + l.length() + "s", "(" + P.left(target - now) + ")") + "\n" : "");
     }
 
     void draw() {
