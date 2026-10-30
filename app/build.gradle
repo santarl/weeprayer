@@ -7,8 +7,8 @@ android {
         applicationId 'io.rfsj.weeprayer'
         minSdk 26          // java.time, v1 signing dropped
         targetSdk 35
-        versionCode 1
-        versionName '0'
+        versionCode 9
+        versionName '9'
     }
     signingConfigs {
         release {
