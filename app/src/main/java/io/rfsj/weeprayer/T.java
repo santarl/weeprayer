@@ -6,8 +6,10 @@ import android.content.Intent;
 
 public class T extends BroadcastReceiver {
     @Override public void onReceive(final Context c, Intent i) {
-        if (M.DISMISS.equals(i.getAction())) { M.dismissTimers(c); return; }
-        if (M.EVT.equals(i.getAction())) {
+        String a = i.getAction();
+        if (M.DISMISS.equals(a)) { M.dismissTimers(c); return; }
+        long key = 0; // the event just handled: the next alarm is the first one after it, even if this one was late
+        if (M.EVT.equals(a)) {
             int k = i.getIntExtra("k", 2);
             if (k == 2) { // monthly refresh (or retry)
                 final PendingResult r = goAsync();
@@ -17,24 +19,28 @@ public class T extends BroadcastReceiver {
                 return;
             }
             String n = i.getStringExtra("n");
-            boolean third = i.getBooleanExtra("x", false); // the last third of the night, not a prayer
+            int p = i.getIntExtra("p", 0);
+            boolean third = p == 5; // the last third of the night, not a prayer
             long target = i.getLongExtra("t", 0), now = System.currentTimeMillis();
-            boolean notif = M.on(c, "nt", false), live = M.on(c, "lu", false);
-            int post = M.post(c);
-            long end = target + post * 60000L; // when the after-azaan part ends
-            if (live) { // live update: start, azaan and every-minute refreshes all redraw the same notification
-                if (k == 0 || k == 1 || k == 4) M.liveDraw(c, n, target, third, now);
-            } else if (k == 0 && M.on(c, "tp", true)) { // prayer timer: runs until the prayer
-                long secs = (target - now) / 1000;
-                if (secs >= 10) {
-                    if (notif) M.remind(c, 100, n, (third ? "starts at " : "prayer at ") + M.fmt(c, P.hm(target)), target);
-                    else M.timer(c, n, (int) secs, 1);
+            key = P.key(i.getLongExtra("e", now), k);
+            if (k == 0) { // the countdown starts
+                long left = target - now;
+                if (left >= 10000) {
+                    if (M.on(c, "tp", true)) M.timer(c, n, (int) (left / 1000), 1);
+                    if (M.on(c, "np", true))
+                        M.note(c, n, (third ? "starts at " : "azaan at ") + M.fmt(c, P.hm(target)), target, true, left + 60000, M.col(p));
                 }
-            } else if (k == 1 && !third && M.on(c, "ti", true) && post > 0) { // iqama timer: `post` minutes from the azaan
-                if (notif) M.remind(c, 101, n + " iqama", post + " min from azaan", end);
-                else M.timer(c, n + " +" + post, post * 60, 2);
+            } else if (k == 1) { // the azaan: the countdown notification becomes the iqamah stopwatch, or goes away
+                if (!third && M.on(c, "ti", true))
+                    M.note(c, "Iqamah", n, target, false, target + M.post(c) * 60000L - now, M.col(p));
+                else M.cancelNote(c);
+            } else if (k == 6) { // Do Not Disturb on
+                M.dndOn(c, target + M.val(c, "dnda", 10, 1, 120) * 60000L);
+            } else if (k == 7) { // Do Not Disturb off
+                M.dndOff(c);
             }
         }
-        M.after(c); // boot, time change, or just fired: set the next alarm and redraw widgets
+        if (key != 0) M.after(c, key); // boot, time change, or just handled: set the next alarm
+        else M.after(c);
     }
 }

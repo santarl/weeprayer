@@ -14,20 +14,21 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
-import android.os.SystemClock;
 import android.provider.AlarmClock;
 import android.provider.Settings;
-import android.view.Gravity;
-import android.view.View;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.RemoteViews;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -46,10 +47,15 @@ public class M extends Activity {
     // published by the "times" workflow (see scripts/scrape.py); the repo must be public
     static final String URL = "https://raw.githubusercontent.com/santarl/weeprayer/data/dubai.txt";
     static final String EVT = "io.rfsj.weeprayer.EVT";
+    static final String DISMISS = "io.rfsj.weeprayer.DISMISS";
+    static final int NOTE = 100; // the countdown / iqamah notification (one, replaced in place)
+
+    /** One colour per prayer (Fajr, Dhuhr/Jumu'ah, Asr, Maghrib, Isha) and for the last third of the night. */
+    static final int[] COL = {0xFF7E57C2, 0xFFFFCA28, 0xFFFF9800, 0xFFEF5350, 0xFF42A5F5, 0xFF26A69A};
 
     TextView t, st;
-    Button ov, bat;
-    View mainV, confV;
+    Button ov, bat, dndPerm, kaBtn;
+    View mainV, confV, leadRow, dtBox, postRow, dndbRow, dndaRow;
     boolean inConf;
 
     // ---------- storage ----------
@@ -57,11 +63,16 @@ public class M extends Activity {
 
     static boolean on(Context c, String k, boolean def) { return sp(c).getBoolean(k, def); }
 
-    /** Minutes before the azaan that the countdown starts (1-180, default 20). */
-    static long pre(Context c) { return Math.max(1, Math.min(180, sp(c).getInt("lead", 20))) * 60000L; }
+    /** A number setting kept inside [lo, hi]. */
+    static int val(Context c, String k, int def, int lo, int hi) { return Math.max(lo, Math.min(hi, sp(c).getInt(k, def))); }
 
-    /** Minutes the reminder keeps going after the azaan (0-180, default 10). */
-    static int post(Context c) { return Math.max(0, Math.min(180, sp(c).getInt("post", 10))); }
+    /** How long before the azaan the countdown starts. */
+    static long pre(Context c) { return val(c, "lead", 20, 1, 180) * 60000L; }
+
+    /** How long the iqamah stopwatch stays after the azaan, in minutes. */
+    static int post(Context c) { return val(c, "post", 10, 1, 180); }
+
+    static int col(int idx) { return COL[Math.max(0, Math.min(5, idx))]; }
 
     static YearMonth ym() { return YearMonth.now(P.Z); }
 
@@ -98,10 +109,10 @@ public class M extends Activity {
     }
 
     // ---------- scheduling: one alarm at a time, each firing sets the next ----------
-    static void arm(Context c, long at, int kind, String name, long target, boolean third) {
-        Intent i = new Intent(c, T.class).setAction(EVT).putExtra("k", kind).putExtra("n", name).putExtra("t", target).putExtra("x", third);
-        PendingIntent pi = PendingIntent.getBroadcast(c, 0, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        set(c, at, pi);
+    static void arm(Context c, long at, int kind, String name, long target, int idx) {
+        Intent i = new Intent(c, T.class).setAction(EVT).putExtra("k", kind).putExtra("n", name)
+                .putExtra("t", target).putExtra("p", idx).putExtra("e", at);
+        set(c, at, PendingIntent.getBroadcast(c, 0, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
     }
 
     static void set(Context c, long at, PendingIntent pi) {
@@ -110,42 +121,28 @@ public class M extends Activity {
         else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
     }
 
-    // ---------- dismissing a Clock timer that has run out ----------
-    static final String DISMISS = "io.rfsj.weeprayer.DISMISS";
-
-    /** A separate alarm (slot 1 = prayer timer, slot 2 = iqama timer) that clears the expired timer. */
-    static void armDismiss(Context c, int slot, long at) {
-        PendingIntent pi = PendingIntent.getBroadcast(c, slot, new Intent(c, T.class).setAction(DISMISS),
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        set(c, at, pi);
-    }
-
-    /** Asks the Clock app to dismiss timers that have run out (not every Clock app supports it). */
-    static void dismissTimers(Context c) {
-        String err = "";
-        try {
-            c.startActivity(new Intent(AlarmClock.ACTION_DISMISS_TIMER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-        } catch (Exception e) { err = "dismiss: " + e; }
-        sp(c).edit().putString("te", err).apply();
-    }
-
-    static void schedule(Context c) {
+    /** Arms the first event after `afterKey` (an event's time*8+kind; a late alarm never loses the next one). */
+    static void schedule(Context c, long afterKey) {
         long now = System.currentTimeMillis();
-        // a live update changes colour 10 and 3 minutes before the azaan; the clock itself ticks on its own
-        int ticks = on(c, "lu", false) && on(c, "tp", true) ? 1 : 0;
-        long[] e = fresh(c) ? P.next(lines(c), now, pre(c), ticks, on(c, "l3r", false)) : null;
-        if (e != null) arm(c, e[0], (int) e[1], e[2] == 5 ? "Last third" : P.nameAt((int) e[2], e[3]), e[3], e[2] == 5);
+        boolean dnd = on(c, "dnd", false);
+        long b = dnd ? val(c, "dndb", 5, 1, 120) * 60000L : 0, a = dnd ? val(c, "dnda", 10, 1, 120) * 60000L : 0;
+        long[] e = fresh(c) ? P.next(lines(c), afterKey, pre(c), on(c, "l3r", false), b, a) : null;
+        if (e != null) arm(c, e[0], (int) e[1], e[2] == 5 ? "Last third" : P.nameAt((int) e[2], e[3]), e[3], (int) e[2]);
         else if (fresh(c)) // month finished: refresh just after midnight on the 1st
-            arm(c, ym().plusMonths(1).atDay(1).atTime(0, 10).atZone(P.Z).toInstant().toEpochMilli(), 2, "", 0, false);
-        else arm(c, now + 3600_000L, 2, "", 0, false); // no data for this month: try again in an hour
+            arm(c, ym().plusMonths(1).atDay(1).atTime(0, 10).atZone(P.Z).toInstant().toEpochMilli(), 2, "", 0, 0);
+        else arm(c, now + 3600_000L, 2, "", 0, 0); // no data for this month: try again in an hour
     }
 
-    /** After anything changed: set the next alarm and redraw the widgets. */
-    static void after(Context c) {
-        schedule(c);
+    /** After anything changed: next alarm, Do Not Disturb safety check, widgets, keep-alive. */
+    static void after(Context c, long afterKey) {
+        schedule(c, afterKey);
+        dndOff(c); // does nothing unless a Do Not Disturb window has ended
         W.all(c);
         keep(c);
+        c.getSystemService(NotificationManager.class).deleteNotificationChannel("live"); // from an earlier version
     }
+
+    static void after(Context c) { after(c, System.currentTimeMillis() * 8 + 7); }
 
     // ---------- keep-alive foreground notification (own channel; hide it in Android's settings) ----------
     static void keepChannel(Context c) {
@@ -161,7 +158,7 @@ public class M extends Activity {
         } catch (Exception e) { sp(c).edit().putString("te", "keep-alive: " + e).apply(); }
     }
 
-    // ---------- Clock app timer ----------
+    // ---------- Clock app timer, and dismissing it when it runs out ----------
     static void timer(Context c, String label, int secs, int slot) {
         String err = "";
         try {
@@ -176,48 +173,32 @@ public class M extends Activity {
         if (err.isEmpty() && on(c, "dt", true)) armDismiss(c, slot, System.currentTimeMillis() + secs * 1000L + 2500);
     }
 
-    // ---------- notification instead of a Clock timer ----------
-    static void remind(Context c, int id, String title, String text, long target) {
+    /** A separate alarm that clears the expired timer. */
+    static void armDismiss(Context c, int slot, long at) {
+        set(c, at, PendingIntent.getBroadcast(c, slot, new Intent(c, T.class).setAction(DISMISS),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
+    }
+
+    /** Asks the Clock app to dismiss timers that have run out (not every Clock app supports it). */
+    static void dismissTimers(Context c) {
+        String err = "";
+        try {
+            c.startActivity(new Intent(AlarmClock.ACTION_DISMISS_TIMER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (Exception e) { err = "dismiss: " + e; }
+        sp(c).edit().putString("te", err).apply();
+    }
+
+    // ---------- the countdown / iqamah notification ----------
+    /** One ongoing notification, replaced in place: a chronometer to `when`, counting down or up, in the prayer's colour. */
+    static void note(Context c, String title, String text, long when, boolean down, long timeoutMs, int color) {
         NotificationManager nm = c.getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel("rem", "Prayer reminders", NotificationManager.IMPORTANCE_LOW));
         Notification.Builder b = new Notification.Builder(c, "rem")
                 .setSmallIcon(R.drawable.ic_stat)
                 .setContentTitle(title)
                 .setContentText(text)
-                .setWhen(target)
-                .setShowWhen(true)
-                .setUsesChronometer(true)
-                .setChronometerCountDown(true)
-                .setTimeoutAfter(Math.max(1000, target - System.currentTimeMillis()))
-                .setAutoCancel(true)
-                .setContentIntent(PendingIntent.getActivity(c, 0, new Intent(c, M.class), PendingIntent.FLAG_IMMUTABLE));
-        nm.notify(id, b.build());
-    }
-
-    // ---------- live update (Android 16 promoted ongoing notification: status bar chip, lock screen, Now Bar) ----------
-    static final int LIVE = 102;
-
-    /**
-     * One ongoing notification that is replaced in place: a chronometer to `when`, counting down or up.
-     * On Android 16 it asks to be promoted to a Live Update; older versions just show it as an ongoing
-     * notification. The request is written as an extra, so no newer SDK is needed to build it.
-     */
-    static void live(Context c, String title, String text, String sam, long when, boolean down, long timeoutMs, int color, int pct) {
-        NotificationManager nm = c.getSystemService(NotificationManager.class);
-        NotificationChannel ch = new NotificationChannel("live", "Live updates", NotificationManager.IMPORTANCE_DEFAULT);
-        ch.setSound(null, null);
-        ch.enableVibration(false);
-        nm.createNotificationChannel(ch);
-        Bundle x = new Bundle();
-        x.putBoolean("android.requestPromotedOngoing", true);
-        if (on(c, "sb", true)) samsung(c, x, title, sam, when, down, color, pct);
-        Notification.Builder b = new Notification.Builder(c, "live")
-                .setSmallIcon(R.drawable.ic_stat)
-                .setContentTitle(title)
-                .setContentText(text)
-                .setStyle(new Notification.BigTextStyle().bigText(text))
                 .setColor(color)
-                .setProgress(100, pct, false)
+                .setColorized(true)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setWhen(when)
@@ -225,64 +206,34 @@ public class M extends Activity {
                 .setUsesChronometer(true)
                 .setChronometerCountDown(down)
                 .setTimeoutAfter(Math.max(1000, timeoutMs))
-                .addExtras(x)
                 .setContentIntent(PendingIntent.getActivity(c, 0, new Intent(c, M.class), PendingIntent.FLAG_IMMUTABLE));
-        nm.notify(LIVE, b.build());
+        nm.notify(NOTE, b.build());
     }
 
-    /**
-     * Samsung's own ongoing-activity extras, as its Clock timer uses them: the Now Bar shows a clock view that
-     * the system ticks by itself, so nothing has to be re-posted every second (or every minute).
-     * Unofficial keys read from Samsung's apps; the phone may ignore them, then the standard live update remains.
-     */
-    static void samsung(Context c, Bundle x, String title, String sub, long when, boolean down, int color, int pct) {
-        RemoteViews rv = new RemoteViews(c.getPackageName(), R.layout.nb_chrono);
-        rv.setChronometerCountDown(R.id.nbc, down);
-        rv.setChronometer(R.id.nbc, SystemClock.elapsedRealtime() + (when - System.currentTimeMillis()), null, true);
-        String k = "android.ongoingActivityNoti.";
-        x.putInt(k + "style", 1);
-        x.putInt(k + "actionType", 1);
-        x.putInt(k + "actionPrimarySet", 1);
-        x.putBoolean("android.showSmallIcon", true);
-        x.putString(k + "primaryInfo", title);
-        x.putString(k + "secondaryInfo", sub);
-        x.putString(k + "nowbarPrimaryInfo", title);
-        x.putString(k + "nowbarSecondaryInfo", sub);
-        x.putInt(k + "chipBgColor", color);
-        x.putInt(k + "progress", pct);
-        x.putInt(k + "progressMax", 100);
-        x.putParcelable(k + "chronometerRemoteView", rv);
-        x.putCharSequence(k + "chronometerRemoteViewTag", down ? "timer_ongoing_activity_chronometer" : "stopwatch_ongoing_activity_chronometer");
-        x.putInt(k + "chronometerRemoteViewPosition", 1); // replaces the primary line with the clock
-        x.putInt(k + "nowbarChronometerPosition", 1);
+    static void cancelNote(Context c) { c.getSystemService(NotificationManager.class).cancel(NOTE); }
+
+    // ---------- Do Not Disturb around the prayers ----------
+    /** Turns Do Not Disturb on (unless the user already has some mode on) until at least `until`. */
+    static void dndOn(Context c, long until) {
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (!on(c, "dnd", false) || !nm.isNotificationPolicyAccessGranted()) return;
+        SharedPreferences p = sp(c);
+        if (!p.getBoolean("dndon", false)) {
+            if (nm.getCurrentInterruptionFilter() != NotificationManager.INTERRUPTION_FILTER_ALL) return; // their own mode: leave it
+            p.edit().putBoolean("dndon", true).apply();
+        }
+        p.edit().putLong("dnduntil", Math.max(p.getLong("dnduntil", 0), until)).apply();
+        nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY);
     }
 
-    /** Calmer to urgent as the time runs out. */
-    static int urgency(long leftMs) { return leftMs <= 3 * 60000L ? 0xFFFF1744 : leftMs <= 10 * 60000L ? 0xFFFFB300 : 0xFF00C853; }
-
-    /**
-     * Draws (or ends) the live update for the prayer whose azaan is at `target`, as of `now`.
-     * Before the azaan: the prayer's name, counting down. After it: "Iqamah", counting up (or down).
-     * The last third of the night only has the countdown.
-     */
-    static void liveDraw(Context c, String name, long target, boolean third, long now) {
-        long lead = pre(c), post = post(c) * 60000L;
-        if (now < target) {
-            if (!on(c, "tp", true)) { cancelLive(c); return; }
-            long left = target - now;
-            String when = (third ? "starts at " : "azaan at ") + fmt(c, P.hm(target));
-            live(c, name, when, name + " \u00b7 " + when, target, true,
-                    left + post + 60000, urgency(left), (int) Math.max(0, Math.min(100, (lead - left) * 100 / lead)));
-        } else if (!third && on(c, "ti", true) && post > 0 && now < target + post) {
-            long since = now - target, end = target + post;
-            boolean up = on(c, "cu", true);
-            live(c, "Iqamah", name + (up ? " \u00b7 since azaan" : " \u00b7 until iqamah"), "Iqamah \u00b7 " + name,
-                    up ? target : end, !up, end - now,
-                    up ? 0xFFFF6D00 : urgency(end - now), (int) Math.min(100, since * 100 / post));
-        } else cancelLive(c);
+    /** Turns it off again, unless a later prayer's window is still running. */
+    static void dndOff(Context c) {
+        SharedPreferences p = sp(c);
+        if (!p.getBoolean("dndon", false) || System.currentTimeMillis() < p.getLong("dnduntil", 0) - 1000) return;
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (nm.isNotificationPolicyAccessGranted()) nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL);
+        p.edit().putBoolean("dndon", false).apply();
     }
-
-    static void cancelLive(Context c) { c.getSystemService(NotificationManager.class).cancel(LIVE); }
 
     /** Widget time: like the app's, but 12h without AM/PM and with a leading zero. */
     static String fw(Context c, String hm) {
@@ -326,61 +277,7 @@ public class M extends Activity {
         m.addView(c, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
         m.addView(cf, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START));
         mainV = m;
-
-        // config screen
-        LinearLayout f = new LinearLayout(this);
-        f.setOrientation(LinearLayout.VERTICAL);
-        f.setBackgroundColor(0xFF000000);
-        f.setPadding(48, 120, 48, 48);
-        f.addView(btn("< back", v -> back()));
-        f.addView(chk("h12", false, "12-hour time"));
-        f.addView(chk("l3", false, "show last third of the night"));
-        f.addView(chk("tp", true, "prayer timer (countdown before azaan)"));
-        f.addView(chk("ti", true, "iqama timer (after azaan)"));
-        f.addView(num("lead", 20, "start countdown (min before azaan)"));
-        f.addView(num("post", 10, "keep going after azaan (min)"));
-        f.addView(chk("dt", true, "dismiss the Clock timer automatically when it runs out"));
-        f.addView(chk("l3r", false, "also remind for the last third of the night (default: fard prayers only)"));
-        f.addView(chk("nt", false, "notification instead of timer"));
-        f.addView(chk("lu", false, "live update instead of timer (status bar chip, Now Bar)"));
-        f.addView(chk("cu", true, "live update: count up after azaan (off: count down)"));
-        f.addView(chk("sb", true, "Samsung Now Bar: self-ticking clock (experimental)"));
-        f.addView(chk("ka", false, "keep-alive notification (own channel, can be hidden)"));
-        f.addView(lab("widget (12-hour time above applies too)"));
-        f.addView(chk("wl3", false, "show last third of the night"));
-        f.addView(chk("wcd", true, "show countdown to the next prayer"));
-        f.addView(lab("tools"));
-        f.addView(btn("refresh now", v -> new Thread(() -> { refresh(this); after(this); runOnUiThread(this::draw); }).start()));
-        f.addView(btn("test timer in 10 s (go to home screen)", v -> {
-            long n = System.currentTimeMillis();
-            arm(this, n + 10000, 0, "Test", n + 40000, false); // fires from the background, 30 s timer
-        }));
-        bat = btn("", v -> startActivity(ignoring()
-                ? new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                : new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()))));
-        f.addView(bat);
-        f.addView(btn("keep-alive notification settings", v -> {
-            keepChannel(this);
-            startActivity(new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
-                    .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName())
-                    .putExtra(Settings.EXTRA_CHANNEL_ID, "keep"));
-        }));
-        f.addView(btn("live update settings", v -> {
-            try {
-                startActivity(new Intent("android.settings.MANAGE_APP_PROMOTED_NOTIFICATIONS")
-                        .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName()));
-            } catch (Exception e) {
-                startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                        .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName()));
-            }
-        }));
-        ov = btn("allow display over other apps", v -> startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:" + getPackageName()))));
-        f.addView(ov);
-        ScrollView sv = new ScrollView(this);
-        sv.setBackgroundColor(0xFF000000);
-        sv.addView(f);
-        confV = sv;
+        confV = config();
 
         setContentView(mainV);
         new Thread(() -> {
@@ -388,6 +285,100 @@ public class M extends Activity {
             after(this);
             runOnUiThread(this::draw);
         }).start();
+    }
+
+    /** The config screen: grouped by what the options do; options that need another one grey out without it. */
+    View config() {
+        LinearLayout f = new LinearLayout(this);
+        f.setOrientation(LinearLayout.VERTICAL);
+        f.setBackgroundColor(0xFF000000);
+        f.setPadding(48, 120, 48, 96);
+        f.addView(btn("< back", v -> back()));
+
+        f.addView(head("Display"));
+        f.addView(radios("h12", false, "24-hour time", "12-hour time"));
+        f.addView(chk("l3", false, "show the last third of the night on the main screen"));
+
+        f.addView(head("Countdown before the azaan"));
+        f.addView(hint("Starts this long before each azaan and runs until it. Show it as:"));
+        leadRow = num("lead", 20, "starts (min before the azaan)");
+        f.addView(leadRow);
+        f.addView(chk("tp", true, "a Clock timer"));
+        dtBox = chk("dt", true, "dismiss the timer when it ends");
+        sub(f, dtBox);
+        f.addView(chk("np", true, "a notification (a colour for each prayer)"));
+        f.addView(chk("l3r", false, "also count down to the last third of the night"));
+
+        f.addView(head("Iqamah (after the azaan)"));
+        f.addView(chk("ti", true, "a stopwatch notification counting up from the azaan"));
+        postRow = num("post", 10, "keep it for (min)");
+        sub(f, postRow);
+
+        f.addView(head("Do Not Disturb"));
+        f.addView(chk("dnd", false, "turn it on around each prayer"));
+        dndbRow = num("dndb", 5, "on (min before the azaan)");
+        sub(f, dndbRow);
+        dndaRow = num("dnda", 10, "off (min after the azaan)");
+        sub(f, dndaRow);
+        dndPerm = btn("", v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)));
+        f.addView(dndPerm);
+
+        f.addView(head("Widget"));
+        f.addView(hint("Uses the time format above."));
+        f.addView(chk("wcd", true, "show the countdown to the next prayer"));
+        f.addView(chk("wl3", false, "show the last third of the night"));
+
+        f.addView(head("Keeping it running"));
+        bat = btn("", v -> startActivity(ignoring()
+                ? new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                : new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()))));
+        f.addView(bat);
+        f.addView(chk("ka", false, "keep-alive notification (own channel, can be hidden)"));
+        kaBtn = btn("keep-alive notification settings", v -> {
+            keepChannel(this);
+            startActivity(new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName())
+                    .putExtra(Settings.EXTRA_CHANNEL_ID, "keep"));
+        });
+        sub(f, kaBtn);
+        ov = btn("allow display over other apps (lets the Clock timer start)", v -> startActivity(
+                new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()))));
+        f.addView(ov);
+
+        f.addView(head("Tools"));
+        f.addView(btn("refresh the times now", v -> new Thread(() -> { refresh(this); after(this); runOnUiThread(this::draw); }).start()));
+        f.addView(btn("test the countdown in 10 s (then go to the home screen)", v -> {
+            long n = System.currentTimeMillis();
+            arm(this, n + 10000, 0, "Test", n + 40000, 2);
+        }));
+        f.addView(btn("test the iqamah stopwatch (1 min)", v -> {
+            askNotif();
+            note(this, "Iqamah", "Test", System.currentTimeMillis(), false, 60000, col(2));
+        }));
+
+        gates();
+        ScrollView sv = new ScrollView(this);
+        sv.setBackgroundColor(0xFF000000);
+        sv.addView(f);
+        return sv;
+    }
+
+    /** Greys out (and disables) the options whose parent option is off. */
+    void gates() {
+        boolean tp = on(this, "tp", true), np = on(this, "np", true), d = on(this, "dnd", false);
+        en(leadRow, tp || np);
+        en(dtBox, tp);
+        en(postRow, on(this, "ti", true));
+        en(dndbRow, d);
+        en(dndaRow, d);
+        en(dndPerm, d);
+        en(kaBtn, on(this, "ka", false));
+    }
+
+    static void en(View v, boolean on) {
+        v.setEnabled(on);
+        v.setAlpha(on ? 1f : 0.4f);
+        if (v instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) v).getChildCount(); i++) en(((ViewGroup) v).getChildAt(i), on);
     }
 
     boolean ignoring() { return getSystemService(PowerManager.class).isIgnoringBatteryOptimizations(getPackageName()); }
@@ -404,6 +395,7 @@ public class M extends Activity {
         return x;
     }
 
+    /** A yes/no option. */
     CheckBox chk(final String key, boolean def, String label) {
         CheckBox b = new CheckBox(this);
         b.setText(label);
@@ -411,13 +403,32 @@ public class M extends Activity {
         b.setChecked(on(this, key, def));
         b.setOnCheckedChangeListener((v, isOn) -> {
             sp(this).edit().putBoolean(key, isOn).apply();
-            if (isOn && (key.equals("nt") || key.equals("ka") || key.equals("lu"))) askNotif();
+            if (isOn && (key.equals("np") || key.equals("ti") || key.equals("ka"))) askNotif();
             if (key.equals("ka")) keep(this);
+            if (key.equals("dnd") && !isOn) { sp(this).edit().putLong("dnduntil", 0).apply(); dndOff(this); }
+            gates();
             W.all(this);
         });
         return b;
     }
 
+    /** An either/or choice (stored as a boolean: true = the second one). */
+    RadioGroup radios(final String key, boolean def, String off, String onLabel) {
+        RadioGroup g = new RadioGroup(this);
+        final RadioButton a = new RadioButton(this), b = new RadioButton(this);
+        a.setText(off);
+        b.setText(onLabel);
+        for (RadioButton r : new RadioButton[]{a, b}) {
+            r.setTextColor(0xFFFFFFFF);
+            r.setId(View.generateViewId());
+            g.addView(r);
+        }
+        (on(this, key, def) ? b : a).setChecked(true);
+        g.setOnCheckedChangeListener((grp, id) -> { sp(this).edit().putBoolean(key, id == b.getId()).apply(); W.all(this); });
+        return g;
+    }
+
+    /** A number setting. */
     LinearLayout num(final String key, int def, String label) {
         LinearLayout r = new LinearLayout(this);
         r.setGravity(Gravity.CENTER_VERTICAL);
@@ -442,12 +453,29 @@ public class M extends Activity {
         return r;
     }
 
-    TextView lab(String s) {
+    TextView head(String s) {
         TextView x = new TextView(this);
         x.setText(s);
-        x.setTextColor(0xFF666666);
-        x.setPadding(0, 48, 0, 8);
+        x.setTextColor(0xFF80CBC4);
+        x.setTextSize(16);
+        x.setPadding(0, 64, 0, 8);
         return x;
+    }
+
+    TextView hint(String s) {
+        TextView x = new TextView(this);
+        x.setText(s);
+        x.setTextColor(0xFF888888);
+        x.setTextSize(12);
+        x.setPadding(0, 0, 0, 8);
+        return x;
+    }
+
+    /** Adds an option that belongs to the one above it, indented. */
+    void sub(LinearLayout f, View v) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.leftMargin = 64;
+        f.addView(v, lp);
     }
 
     void askNotif() {
@@ -490,6 +518,8 @@ public class M extends Activity {
         st.setText((e.isEmpty() ? "" : "fetch: " + e + "\n") + te);
         st.setVisibility(e.isEmpty() && te.isEmpty() ? View.GONE : View.VISIBLE);
         bat.setText(ignoring() ? "battery: unoptimized (tap to review)" : "set battery to unoptimized");
+        dndPerm.setText(getSystemService(NotificationManager.class).isNotificationPolicyAccessGranted()
+                ? "Do Not Disturb access: allowed (tap to review)" : "allow Do Not Disturb access");
         ov.setVisibility(Settings.canDrawOverlays(this) ? View.GONE : View.VISIBLE);
     }
 }

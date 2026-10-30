@@ -108,25 +108,6 @@ final class P {
         return new long[]{cur, nx, nt};
     }
 
-    /**
-     * Events for one prayer: {fireAt, kind, prayer index, prayer time} or null once the azaan has passed.
-     * Kinds: 0 = countdown starts, 1 = the azaan, 4 = colour step (10 and 3 minutes before, only if ticks != 0).
-     */
-    private static long[] window(long now, long t, long pre, int ticks, int idx) {
-        long start = t - pre;
-        if (start > now) return new long[]{start, 0, idx, t};
-        if (t > now) {
-            if (ticks != 0) {
-                for (long off : new long[]{10 * 60000L, 3 * 60000L}) {
-                    long m = t - off;
-                    if (m > now && m > start) return new long[]{m, 4, idx, t};
-                }
-            }
-            return new long[]{t, 1, idx, t};
-        }
-        return null;
-    }
-
     /** Start of the last third of the night that ends at Fajr on day d (0 if d is not stored). */
     static long third(List<String> lines, LocalDate d) {
         String[] t = row(lines, d), y = row(lines, d.minusDays(1));
@@ -135,25 +116,43 @@ final class P {
         return m + (f - m) * 2 / 3;
     }
 
+    /** Orders events: by time, then kind (so two events at the same time are both handled, in order). */
+    static long key(long time, int kind) { return time * 8 + kind; }
+
+    private static long[] pick(long[] best, long time, int kind, int idx, long target, long afterKey) {
+        if (key(time, kind) <= afterKey) return best;
+        if (best != null && key(best[0], (int) best[1]) <= key(time, kind)) return best;
+        return new long[]{time, kind, idx, target};
+    }
+
     /**
-     * Next event after now: {fireAt, kind (0 = countdown starts, 1 = azaan, 3 = new day, 4 = colour step),
-     * prayer index (5 = last third of the night), prayer time}, or null.
+     * The first event after `afterKey` (see key): {fireAt, kind, prayer index (5 = last third), prayer time}, or null.
+     * Kinds: 0 = countdown starts (`pre` ms before), 1 = the azaan, 3 = new day, 6 / 7 = Do Not Disturb on
+     * (`dndB` ms before) / off (`dndA` ms after) for the five prayers, only if dndB > 0.
      */
-    static long[] next(List<String> lines, long now, long pre, int ticks, boolean third) {
+    static long[] next(List<String> lines, long afterKey, long pre, boolean third, long dndB, long dndA) {
+        long[] best = null;
         for (String l : lines) {
             String[] f = l.split(",");
             LocalDate d = LocalDate.parse(f[0]);
-            long mid = d.atStartOfDay(Z).toInstant().toEpochMilli() + 5000; // new day: refresh widgets
-            if (mid > now) return new long[]{mid, 3, 0, 0};
-            if (third) { // the night that ends at this day's Fajr: countdown only, nothing after it starts
-                long[] e = window(now, third(lines, d), pre, ticks, 5);
-                if (e != null) return e;
+            best = pick(best, d.atStartOfDay(Z).toInstant().toEpochMilli() + 5000, 3, 0, 0, afterKey); // refresh widgets
+            if (third) { // the night that ends at this day's Fajr: countdown only
+                long q = third(lines, d);
+                if (q != 0) {
+                    best = pick(best, q - pre, 0, 5, q, afterKey);
+                    best = pick(best, q, 1, 5, q, afterKey);
+                }
             }
             for (int i = 0; i < 5; i++) {
-                long[] e = window(now, at(d, f[i + 1]), pre, ticks, i);
-                if (e != null) return e;
+                long t = at(d, f[i + 1]);
+                best = pick(best, t - pre, 0, i, t, afterKey);
+                best = pick(best, t, 1, i, t, afterKey);
+                if (dndB > 0) {
+                    best = pick(best, t - dndB, 6, i, t, afterKey);
+                    best = pick(best, t + dndA, 7, i, t, afterKey);
+                }
             }
         }
-        return null;
+        return best;
     }
 }
