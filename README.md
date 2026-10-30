@@ -7,3 +7,7 @@ One-time setup: open the app, allow "display over other apps" (lets it start the
 Build: Actions -> "test build" (side-by-side APK) or "release". Needs the secrets KEYSTORE_B64, KEYSTORE_PASSWORD, KEY_ALIAS.
 
 GPL-3.0.
+
+## Data
+
+The `times` workflow (main) scrapes the Dubai table with `scripts/scrape.py` as the month turns and publishes it to the `data` branch as a single commit, replaced each time. The app reads `https://raw.githubusercontent.com/santarl/weeprayer/data/dubai.txt` (the repo must be public). First run: Actions -> times -> Run workflow. If the page layout changes the run fails and keeps the page as an artifact.

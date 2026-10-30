@@ -1,0 +1,43 @@
+name: times
+on:
+  schedule:
+    - cron: '20 20-23 28-31 * *'   # 00:20-03:20 Dubai as the month turns (the days before it do nothing)
+    - cron: '20 */6 1-2 * *'       # catch-up in case the site was late
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency: times
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Look at the data we already have
+        run: |
+          mkdir -p cur new
+          if git fetch -q --depth=1 origin data 2>/dev/null; then git show FETCH_HEAD:dubai.txt > cur/dubai.txt || true; fi
+      - name: Scrape (does nothing if this month is already stored)
+        run: python3 scripts/scrape.py cur/dubai.txt new/dubai.txt
+      - name: Keep the page that failed to parse
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: page
+          path: debug/page.html
+          if-no-files-found: ignore
+      - name: Publish to the data branch (one commit, replaced each time)
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          [ -f new/dubai.txt ] || { echo "nothing new"; exit 0; }
+          cd new
+          git init -q -b data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dubai.txt
+          git commit -qm "Dubai prayer times $(head -c 7 dubai.txt)"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" data
+      - name: Ask GitHub not to pause the schedule after 60 quiet days
+        if: always()
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: gh workflow enable times.yml || true
