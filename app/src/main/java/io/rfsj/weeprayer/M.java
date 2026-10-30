@@ -37,8 +37,8 @@ import java.util.Arrays;
 import java.util.List;
 
 public class M extends Activity {
-    static final String URL = "https://www.khaleejtimes.com/prayer-time-uae/dubai";
-    static final String UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36";
+    // published by the "times" workflow (see scripts/scrape.py); the repo must be public
+    static final String URL = "https://raw.githubusercontent.com/santarl/weeprayer/data/dubai.txt";
     static final String EVT = "io.rfsj.weeprayer.EVT";
 
     TextView t, st;
@@ -65,7 +65,6 @@ public class M extends Activity {
         HttpURLConnection c = (HttpURLConnection) new URL(URL).openConnection();
         c.setConnectTimeout(4000);
         c.setReadTimeout(5000);
-        c.setRequestProperty("User-Agent", UA);
         try (InputStream in = c.getInputStream(); ByteArrayOutputStream o = new ByteArrayOutputStream()) {
             byte[] b = new byte[8192];
             int n;
@@ -74,12 +73,12 @@ public class M extends Activity {
         }
     }
 
-    /** Fetch, parse and store this month. Records the outcome in prefs "e" (empty = ok). */
+    /** Fetch the workflow's file and store this month. Records the outcome in prefs "e" (empty = ok). */
     static void refresh(Context c) {
         String err = "";
         try {
-            List<String> l = P.parse(get(), ym());
-            if (l == null) err = "page did not contain all days of " + ym();
+            List<String> l = P.load(get(), ym());
+            if (l == null) err = "no data for " + ym() + " yet";
             else sp(c).edit().putString("d", String.join("\n", l)).putString("m", ym().toString())
                     .putLong("f", System.currentTimeMillis()).apply();
         } catch (Exception e) { err = e.toString(); }
