@@ -14,6 +14,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.provider.AlarmClock;
 import android.provider.Settings;
 import android.view.Gravity;
@@ -26,6 +27,7 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.RemoteViews;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -106,10 +108,9 @@ public class M extends Activity {
 
     static void schedule(Context c) {
         long now = System.currentTimeMillis();
-        // live update refreshed every minute: minutes left, progress and colour change as it goes
-        int ticks = on(c, "lu", false) && on(c, "lp", true)
-                ? (on(c, "tp", true) ? 1 : 0) | (on(c, "ti", true) && post(c) > 0 ? 2 : 0) : 0;
-        long[] e = fresh(c) ? P.next(lines(c), now, pre(c), post(c) * 60000L, ticks, on(c, "l3r", false)) : null;
+        // a live update changes colour 10 and 3 minutes before the azaan; the clock itself ticks on its own
+        int ticks = on(c, "lu", false) && on(c, "tp", true) ? 1 : 0;
+        long[] e = fresh(c) ? P.next(lines(c), now, pre(c), ticks, on(c, "l3r", false)) : null;
         if (e != null) arm(c, e[0], (int) e[1], e[2] == 5 ? "Last third" : P.nameAt((int) e[2], e[3]), e[3], e[2] == 5);
         else if (fresh(c)) // month finished: refresh just after midnight on the 1st
             arm(c, ym().plusMonths(1).atDay(1).atTime(0, 10).atZone(P.Z).toInstant().toEpochMilli(), 2, "", 0, false);
@@ -176,7 +177,7 @@ public class M extends Activity {
      * On Android 16 it asks to be promoted to a Live Update; older versions just show it as an ongoing
      * notification. The request is written as an extra, so no newer SDK is needed to build it.
      */
-    static void live(Context c, String title, String text, long when, boolean down, long timeoutMs, int color, int pct) {
+    static void live(Context c, String title, String text, String sam, long when, boolean down, long timeoutMs, int color, int pct) {
         NotificationManager nm = c.getSystemService(NotificationManager.class);
         NotificationChannel ch = new NotificationChannel("live", "Live updates", NotificationManager.IMPORTANCE_DEFAULT);
         ch.setSound(null, null);
@@ -184,6 +185,7 @@ public class M extends Activity {
         nm.createNotificationChannel(ch);
         Bundle x = new Bundle();
         x.putBoolean("android.requestPromotedOngoing", true);
+        if (on(c, "sb", true)) samsung(c, x, title, sam, when, down, color, pct);
         Notification.Builder b = new Notification.Builder(c, "live")
                 .setSmallIcon(R.drawable.ic_stat)
                 .setContentTitle(title)
@@ -203,13 +205,35 @@ public class M extends Activity {
         nm.notify(LIVE, b.build());
     }
 
+    /**
+     * Samsung's own ongoing-activity extras, as its Clock timer uses them: the Now Bar shows a clock view that
+     * the system ticks by itself, so nothing has to be re-posted every second (or every minute).
+     * Unofficial keys read from Samsung's apps; the phone may ignore them, then the standard live update remains.
+     */
+    static void samsung(Context c, Bundle x, String title, String sub, long when, boolean down, int color, int pct) {
+        RemoteViews rv = new RemoteViews(c.getPackageName(), R.layout.nb_chrono);
+        rv.setChronometerCountDown(R.id.nbc, down);
+        rv.setChronometer(R.id.nbc, SystemClock.elapsedRealtime() + (when - System.currentTimeMillis()), null, true);
+        String k = "android.ongoingActivityNoti.";
+        x.putInt(k + "style", 1);
+        x.putInt(k + "actionType", 1);
+        x.putInt(k + "actionPrimarySet", 1);
+        x.putBoolean("android.showSmallIcon", true);
+        x.putString(k + "primaryInfo", title);
+        x.putString(k + "secondaryInfo", sub);
+        x.putString(k + "nowbarPrimaryInfo", title);
+        x.putString(k + "nowbarSecondaryInfo", sub);
+        x.putInt(k + "chipBgColor", color);
+        x.putInt(k + "progress", pct);
+        x.putInt(k + "progressMax", 100);
+        x.putParcelable(k + "chronometerRemoteView", rv);
+        x.putCharSequence(k + "chronometerRemoteViewTag", down ? "timer_ongoing_activity_chronometer" : "stopwatch_ongoing_activity_chronometer");
+        x.putInt(k + "chronometerRemoteViewPosition", 1); // replaces the primary line with the clock
+        x.putInt(k + "nowbarChronometerPosition", 1);
+    }
+
     /** Calmer to urgent as the time runs out. */
     static int urgency(long leftMs) { return leftMs <= 3 * 60000L ? 0xFFFF1744 : leftMs <= 10 * 60000L ? 0xFFFFB300 : 0xFF00C853; }
-
-    static String mins(long ms) {
-        long m = (ms + 59999) / 60000;
-        return m < 1 ? "<1 min" : m + " min";
-    }
 
     /**
      * Draws (or ends) the live update for the prayer whose azaan is at `target`, as of `now`.
@@ -221,14 +245,14 @@ public class M extends Activity {
         if (now < target) {
             if (!on(c, "tp", true)) { cancelLive(c); return; }
             long left = target - now;
-            live(c, name, (third ? "starts at " : "azaan at ") + fmt(c, P.hm(target)) + " \u00b7 " + mins(left) + " left", target, true,
+            String when = (third ? "starts at " : "azaan at ") + fmt(c, P.hm(target));
+            live(c, name, when, name + " \u00b7 " + when, target, true,
                     left + post + 60000, urgency(left), (int) Math.max(0, Math.min(100, (lead - left) * 100 / lead)));
         } else if (!third && on(c, "ti", true) && post > 0 && now < target + post) {
             long since = now - target, end = target + post;
             boolean up = on(c, "cu", true);
-            String text = up ? (since < 60000 ? name + " \u00b7 just now" : name + " \u00b7 " + since / 60000 + " min since azaan")
-                    : name + " \u00b7 iqamah in " + mins(end - now);
-            live(c, "Iqamah", text, up ? target : end, !up, end - now,
+            live(c, "Iqamah", name + (up ? " \u00b7 since azaan" : " \u00b7 until iqamah"), "Iqamah \u00b7 " + name,
+                    up ? target : end, !up, end - now,
                     up ? 0xFFFF6D00 : urgency(end - now), (int) Math.min(100, since * 100 / post));
         } else cancelLive(c);
     }
@@ -294,7 +318,7 @@ public class M extends Activity {
         f.addView(chk("nt", false, "notification instead of timer"));
         f.addView(chk("lu", false, "live update instead of timer (status bar chip, Now Bar)"));
         f.addView(chk("cu", true, "live update: count up after azaan (off: count down)"));
-        f.addView(chk("lp", true, "live update: refresh every minute (minutes left, progress, colour)"));
+        f.addView(chk("sb", true, "Samsung Now Bar: self-ticking clock (experimental)"));
         f.addView(chk("ka", false, "keep-alive notification (own channel, can be hidden)"));
         f.addView(lab("widget (12-hour time above applies too)"));
         f.addView(chk("wl3", false, "show last third of the night"));
