@@ -20,16 +20,12 @@ public class T extends BroadcastReceiver {
             boolean notif = M.on(c, "nt", false), live = M.on(c, "lu", false);
             int post = M.post(c);
             long end = target + post * 60000L; // when the after-azaan part ends
-            if (k == 1 && live) { // live update, second half: count up (or down) from the azaan, or end it
-                if (M.on(c, "ti", true) && post > 0) {
-                    boolean up = M.on(c, "cu", true);
-                    M.live(c, n, up ? "since azaan" : "until iqama", up ? target : end, !up, end - now);
-                } else M.cancelLive(c);
+            if (live) { // live update: start, azaan and every-minute refreshes all redraw the same notification
+                if (k == 0 || k == 1 || k == 4) M.liveDraw(c, n, target, now);
             } else if (k == 0 && M.on(c, "tp", true)) { // prayer timer: runs until the prayer
                 long secs = (target - now) / 1000;
                 if (secs >= 10) {
-                    if (live) M.live(c, n, "azaan at " + M.fmt(c, P.hm(target)), target, true, end - now);
-                    else if (notif) M.remind(c, 100, n, "prayer at " + M.fmt(c, P.hm(target)), target);
+                    if (notif) M.remind(c, 100, n, "prayer at " + M.fmt(c, P.hm(target)), target);
                     else M.timer(c, n, (int) secs);
                 }
             } else if (k == 1 && M.on(c, "ti", true) && post > 0) { // iqama timer: `post` minutes from the azaan

@@ -106,7 +106,10 @@ public class M extends Activity {
 
     static void schedule(Context c) {
         long now = System.currentTimeMillis();
-        long[] e = fresh(c) ? P.next(lines(c), now, pre(c)) : null;
+        // live update refreshed every minute: minutes left, progress and colour change as it goes
+        int ticks = on(c, "lu", false) && on(c, "lp", true)
+                ? (on(c, "tp", true) ? 1 : 0) | (on(c, "ti", true) && post(c) > 0 ? 2 : 0) : 0;
+        long[] e = fresh(c) ? P.next(lines(c), now, pre(c), post(c) * 60000L, ticks) : null;
         if (e != null) arm(c, e[0], (int) e[1], P.nameAt((int) e[2], e[3]), e[3]);
         else if (fresh(c)) // month finished: refresh just after midnight on the 1st
             arm(c, ym().plusMonths(1).atDay(1).atTime(0, 10).atZone(P.Z).toInstant().toEpochMilli(), 2, "", 0);
@@ -173,7 +176,7 @@ public class M extends Activity {
      * On Android 16 it asks to be promoted to a Live Update; older versions just show it as an ongoing
      * notification. The request is written as an extra, so no newer SDK is needed to build it.
      */
-    static void live(Context c, String title, String text, long when, boolean down, long timeoutMs) {
+    static void live(Context c, String title, String text, long when, boolean down, long timeoutMs, int color, int pct) {
         NotificationManager nm = c.getSystemService(NotificationManager.class);
         NotificationChannel ch = new NotificationChannel("live", "Live updates", NotificationManager.IMPORTANCE_DEFAULT);
         ch.setSound(null, null);
@@ -186,6 +189,8 @@ public class M extends Activity {
                 .setContentTitle(title)
                 .setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text))
+                .setColor(color)
+                .setProgress(100, pct, false)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setWhen(when)
@@ -196,6 +201,35 @@ public class M extends Activity {
                 .addExtras(x)
                 .setContentIntent(PendingIntent.getActivity(c, 0, new Intent(c, M.class), PendingIntent.FLAG_IMMUTABLE));
         nm.notify(LIVE, b.build());
+    }
+
+    /** Calmer to urgent as the time runs out. */
+    static int urgency(long leftMs) { return leftMs <= 3 * 60000L ? 0xFFFF1744 : leftMs <= 10 * 60000L ? 0xFFFFB300 : 0xFF00C853; }
+
+    static String mins(long ms) {
+        long m = (ms + 59999) / 60000;
+        return m < 1 ? "<1 min" : m + " min";
+    }
+
+    /**
+     * Draws (or ends) the live update for the prayer whose azaan is at `target`, as of `now`.
+     * Before the azaan: the prayer's name, counting down. After it: "Iqamah", counting up (or down).
+     */
+    static void liveDraw(Context c, String name, long target, long now) {
+        long lead = pre(c), post = post(c) * 60000L;
+        if (now < target) {
+            if (!on(c, "tp", true)) { cancelLive(c); return; }
+            long left = target - now;
+            live(c, name, "azaan at " + fmt(c, P.hm(target)) + " \u00b7 " + mins(left) + " left", target, true,
+                    left + post + 60000, urgency(left), (int) Math.max(0, Math.min(100, (lead - left) * 100 / lead)));
+        } else if (on(c, "ti", true) && post > 0 && now < target + post) {
+            long since = now - target, end = target + post;
+            boolean up = on(c, "cu", true);
+            String text = up ? (since < 60000 ? name + " \u00b7 just now" : name + " \u00b7 " + since / 60000 + " min since azaan")
+                    : name + " \u00b7 iqamah in " + mins(end - now);
+            live(c, "Iqamah", text, up ? target : end, !up, end - now,
+                    up ? 0xFFFF6D00 : urgency(end - now), (int) Math.min(100, since * 100 / post));
+        } else cancelLive(c);
     }
 
     static void cancelLive(Context c) { c.getSystemService(NotificationManager.class).cancel(LIVE); }
@@ -258,6 +292,7 @@ public class M extends Activity {
         f.addView(chk("nt", false, "notification instead of timer"));
         f.addView(chk("lu", false, "live update instead of timer (status bar chip, Now Bar)"));
         f.addView(chk("cu", true, "live update: count up after azaan (off: count down)"));
+        f.addView(chk("lp", true, "live update: refresh every minute (minutes left, progress, colour)"));
         f.addView(chk("ka", false, "keep-alive notification (own channel, can be hidden)"));
         f.addView(lab("widget (12-hour time above applies too)"));
         f.addView(chk("wl3", false, "show last third of the night"));

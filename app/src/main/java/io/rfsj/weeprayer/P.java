@@ -108,17 +108,38 @@ final class P {
         return new long[]{cur, nx, nt};
     }
 
-    /** Next event after now: {fireAt, kind (0 = `pre` ms before, 1 = azaan, 3 = new day), prayer index, prayer time}, or null. */
-    static long[] next(List<String> lines, long now, long pre) {
+    /**
+     * Events for one prayer: {fireAt, kind, prayer index, prayer time} or null once its window is over.
+     * Kinds: 0 = countdown starts, 1 = the azaan, 4 = one-minute refresh of a live update.
+     * ticks: bit 0 = refresh every minute before the azaan, bit 1 = after it (until `post` ms later).
+     */
+    private static long[] window(long now, long t, long pre, long post, int ticks, int idx) {
+        long start = t - pre;
+        if (start > now) return new long[]{start, 0, idx, t};
+        if (t > now) {
+            if ((ticks & 1) != 0) {
+                long tk = start + ((now - start) / 60000 + 1) * 60000;
+                if (tk < t) return new long[]{tk, 4, idx, t};
+            }
+            return new long[]{t, 1, idx, t};
+        }
+        if ((ticks & 2) != 0 && now < t + post) {
+            long tk = t + ((now - t) / 60000 + 1) * 60000;
+            if (tk < t + post) return new long[]{tk, 4, idx, t};
+        }
+        return null;
+    }
+
+    /** Next event after now: {fireAt, kind (0 = countdown starts, 1 = azaan, 3 = new day, 4 = refresh), prayer index, prayer time}, or null. */
+    static long[] next(List<String> lines, long now, long pre, long post, int ticks) {
         for (String l : lines) {
             String[] f = l.split(",");
             LocalDate d = LocalDate.parse(f[0]);
             long mid = d.atStartOfDay(Z).toInstant().toEpochMilli() + 5000; // new day: refresh widgets
             if (mid > now) return new long[]{mid, 3, 0, 0};
             for (int i = 0; i < 5; i++) {
-                long t = at(d, f[i + 1]);
-                if (t - pre > now) return new long[]{t - pre, 0, i, t};
-                if (t > now) return new long[]{t, 1, i, t};
+                long[] e = window(now, at(d, f[i + 1]), pre, post, ticks, i);
+                if (e != null) return e;
             }
         }
         return null;
