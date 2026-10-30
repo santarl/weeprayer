@@ -18,8 +18,12 @@ import android.provider.AlarmClock;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -50,6 +54,12 @@ public class M extends Activity {
     static SharedPreferences sp(Context c) { return c.getSharedPreferences("p", 0); }
 
     static boolean on(Context c, String k, boolean def) { return sp(c).getBoolean(k, def); }
+
+    /** Minutes before the azaan that the countdown starts (1-180, default 20). */
+    static long pre(Context c) { return Math.max(1, Math.min(180, sp(c).getInt("lead", 20))) * 60000L; }
+
+    /** Minutes the reminder keeps going after the azaan (0-180, default 10). */
+    static int post(Context c) { return Math.max(0, Math.min(180, sp(c).getInt("post", 10))); }
 
     static YearMonth ym() { return YearMonth.now(P.Z); }
 
@@ -96,7 +106,7 @@ public class M extends Activity {
 
     static void schedule(Context c) {
         long now = System.currentTimeMillis();
-        long[] e = fresh(c) ? P.next(lines(c), now) : null;
+        long[] e = fresh(c) ? P.next(lines(c), now, pre(c)) : null;
         if (e != null) arm(c, e[0], (int) e[1], P.nameAt((int) e[2], e[3]), e[3]);
         else if (fresh(c)) // month finished: refresh just after midnight on the 1st
             arm(c, ym().plusMonths(1).atDay(1).atTime(0, 10).atZone(P.Z).toInstant().toEpochMilli(), 2, "", 0);
@@ -206,8 +216,10 @@ public class M extends Activity {
         f.addView(btn("< back", v -> back()));
         f.addView(chk("h12", false, "12-hour time"));
         f.addView(chk("l3", false, "show last third of the night"));
-        f.addView(chk("tp", true, "prayer timer (starts 20 min before)"));
-        f.addView(chk("ti", true, "iqama timer (10 min from azaan)"));
+        f.addView(chk("tp", true, "prayer timer (countdown before azaan)"));
+        f.addView(chk("ti", true, "iqama timer (after azaan)"));
+        f.addView(num("lead", 20, "start countdown (min before azaan)"));
+        f.addView(num("post", 10, "keep going after azaan (min)"));
         f.addView(chk("nt", false, "notification instead of timer"));
         f.addView(chk("ka", false, "keep-alive notification (own channel, can be hidden)"));
         f.addView(lab("widget (12-hour time above applies too)"));
@@ -247,7 +259,7 @@ public class M extends Activity {
 
     boolean ignoring() { return getSystemService(PowerManager.class).isIgnoringBatteryOptimizations(getPackageName()); }
 
-    void back() { inConf = false; setContentView(mainV); draw(); W.all(this); }
+    void back() { inConf = false; setContentView(mainV); draw(); after(this); }
 
     @Override public void onBackPressed() { if (inConf) back(); else super.onBackPressed(); }
 
@@ -271,6 +283,30 @@ public class M extends Activity {
             W.all(this);
         });
         return b;
+    }
+
+    LinearLayout num(final String key, int def, String label) {
+        LinearLayout r = new LinearLayout(this);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        TextView lb = new TextView(this);
+        lb.setText(label);
+        lb.setTextColor(0xFFFFFFFF);
+        EditText e = new EditText(this);
+        e.setInputType(InputType.TYPE_CLASS_NUMBER);
+        e.setEms(3);
+        e.setTextColor(0xFFFFFFFF);
+        e.setText(String.valueOf(sp(this).getInt(key, def)));
+        e.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int n) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int n) {}
+            @Override public void afterTextChanged(Editable s) {
+                try { sp(M.this).edit().putInt(key, Integer.parseInt(s.toString().trim())).apply(); }
+                catch (NumberFormatException ex) { /* empty while typing */ }
+            }
+        });
+        r.addView(lb, new LinearLayout.LayoutParams(0, -2, 1));
+        r.addView(e);
+        return r;
     }
 
     TextView lab(String s) {

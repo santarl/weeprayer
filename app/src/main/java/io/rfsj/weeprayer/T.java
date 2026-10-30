@@ -24,9 +24,12 @@ public class T extends BroadcastReceiver {
                     if (notif) M.remind(c, 100, n, "prayer at " + M.fmt(c, P.hm(target)), target);
                     else M.timer(c, n, (int) secs);
                 }
-            } else if (k == 1 && M.on(c, "ti", true)) { // iqama timer: 10 minutes from the azaan
-                if (notif) M.remind(c, 101, n + " iqama", "10 min from azaan", now + 600000);
-                else M.timer(c, n + " +10", 600);
+            } else if (k == 1 && M.on(c, "ti", true)) { // iqama timer: `post` minutes from the azaan
+                int post = M.post(c);
+                if (post > 0) {
+                    if (notif) M.remind(c, 101, n + " iqama", post + " min from azaan", target + post * 60000L);
+                    else M.timer(c, n + " +" + post, post * 60);
+                }
             }
         }
         M.after(c); // boot, time change, or just fired: set the next alarm and redraw widgets

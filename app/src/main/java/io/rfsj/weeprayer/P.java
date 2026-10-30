@@ -14,7 +14,6 @@ import java.util.regex.Pattern;
 final class P {
     static final String[] N = {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"};
     static final ZoneId Z = ZoneId.of("Asia/Dubai");
-    static final long PRE = 20 * 60000L;
 
 
     private static final Pattern LINE = Pattern.compile("\\d{4}-\\d{2}-\\d{2}(,\\d{2}:\\d{2}){5}");
@@ -109,8 +108,8 @@ final class P {
         return new long[]{cur, nx, nt};
     }
 
-    /** Next event after now: {fireAt, kind (0 = 20 min before, 1 = azaan, 3 = new day), prayer index, prayer time}, or null. */
-    static long[] next(List<String> lines, long now) {
+    /** Next event after now: {fireAt, kind (0 = `pre` ms before, 1 = azaan, 3 = new day), prayer index, prayer time}, or null. */
+    static long[] next(List<String> lines, long now, long pre) {
         for (String l : lines) {
             String[] f = l.split(",");
             LocalDate d = LocalDate.parse(f[0]);
@@ -118,7 +117,7 @@ final class P {
             if (mid > now) return new long[]{mid, 3, 0, 0};
             for (int i = 0; i < 5; i++) {
                 long t = at(d, f[i + 1]);
-                if (t - PRE > now) return new long[]{t - PRE, 0, i, t};
+                if (t - pre > now) return new long[]{t - pre, 0, i, t};
                 if (t > now) return new long[]{t, 1, i, t};
             }
         }
