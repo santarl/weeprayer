@@ -165,6 +165,41 @@ public class M extends Activity {
         nm.notify(id, b.build());
     }
 
+    // ---------- live update (Android 16 promoted ongoing notification: status bar chip, lock screen, Now Bar) ----------
+    static final int LIVE = 102;
+
+    /**
+     * One ongoing notification that is replaced in place: a chronometer to `when`, counting down or up.
+     * On Android 16 it asks to be promoted to a Live Update; older versions just show it as an ongoing
+     * notification. The request is written as an extra, so no newer SDK is needed to build it.
+     */
+    static void live(Context c, String title, String text, long when, boolean down, long timeoutMs) {
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        NotificationChannel ch = new NotificationChannel("live", "Live updates", NotificationManager.IMPORTANCE_DEFAULT);
+        ch.setSound(null, null);
+        ch.enableVibration(false);
+        nm.createNotificationChannel(ch);
+        Bundle x = new Bundle();
+        x.putBoolean("android.requestPromotedOngoing", true);
+        Notification.Builder b = new Notification.Builder(c, "live")
+                .setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setWhen(when)
+                .setShowWhen(true)
+                .setUsesChronometer(true)
+                .setChronometerCountDown(down)
+                .setTimeoutAfter(Math.max(1000, timeoutMs))
+                .addExtras(x)
+                .setContentIntent(PendingIntent.getActivity(c, 0, new Intent(c, M.class), PendingIntent.FLAG_IMMUTABLE));
+        nm.notify(LIVE, b.build());
+    }
+
+    static void cancelLive(Context c) { c.getSystemService(NotificationManager.class).cancel(LIVE); }
+
     /** Widget time: like the app's, but 12h without AM/PM and with a leading zero. */
     static String fw(Context c, String hm) {
         if (!on(c, "h12", false)) return hm;
@@ -221,6 +256,8 @@ public class M extends Activity {
         f.addView(num("lead", 20, "start countdown (min before azaan)"));
         f.addView(num("post", 10, "keep going after azaan (min)"));
         f.addView(chk("nt", false, "notification instead of timer"));
+        f.addView(chk("lu", false, "live update instead of timer (status bar chip, Now Bar)"));
+        f.addView(chk("cu", true, "live update: count up after azaan (off: count down)"));
         f.addView(chk("ka", false, "keep-alive notification (own channel, can be hidden)"));
         f.addView(lab("widget (12-hour time above applies too)"));
         f.addView(chk("wl3", false, "show last third of the night"));
@@ -240,6 +277,15 @@ public class M extends Activity {
             startActivity(new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
                     .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName())
                     .putExtra(Settings.EXTRA_CHANNEL_ID, "keep"));
+        }));
+        f.addView(btn("live update settings", v -> {
+            try {
+                startActivity(new Intent("android.settings.MANAGE_APP_PROMOTED_NOTIFICATIONS")
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName()));
+            } catch (Exception e) {
+                startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName()));
+            }
         }));
         ov = btn("allow display over other apps", v -> startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:" + getPackageName()))));
@@ -278,7 +324,7 @@ public class M extends Activity {
         b.setChecked(on(this, key, def));
         b.setOnCheckedChangeListener((v, isOn) -> {
             sp(this).edit().putBoolean(key, isOn).apply();
-            if (isOn && (key.equals("nt") || key.equals("ka"))) askNotif();
+            if (isOn && (key.equals("nt") || key.equals("ka") || key.equals("lu"))) askNotif();
             if (key.equals("ka")) keep(this);
             W.all(this);
         });
