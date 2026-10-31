@@ -304,15 +304,23 @@ public class M extends Activity {
         leadRow = num("lead", 20, "starts (min before the azaan)");
         f.addView(leadRow);
         f.addView(chk("tp", true, "a Clock timer"));
-        dtBox = chk("dt", true, "dismiss the timer when it ends");
-        sub(f, dtBox);
         f.addView(chk("np", true, "a notification (a colour for each prayer)"));
         f.addView(chk("l3r", false, "also count down to the last third of the night"));
 
         f.addView(head("Iqamah (after the azaan)"));
-        f.addView(chk("ti", true, "a stopwatch notification counting up from the azaan"));
-        postRow = num("post", 10, "keep it for (min)");
-        sub(f, postRow);
+        f.addView(hint("Starts at the azaan. On Samsung the countdown timer just keeps counting up after it ends, so no extra timer is needed."));
+        postRow = num("post", 10, "lasts (min after the azaan)");
+        f.addView(postRow);
+        f.addView(chk("ti", true, "a notification counting up from the azaan (stopwatch)"));
+        f.addView(chk("ip", false, "a second Clock timer counting down to the iqamah (for Clock apps that don't count up)"));
+
+        f.addView(head("Clock timers"));
+        f.addView(hint("Dismissing silences a ringing timer; the Clock may keep it counting up."));
+        dtBox = chk("dt", true, "dismiss automatically: silence it at the azaan, clear it when the iqamah time is up");
+        f.addView(dtBox);
+        ov = btn("allow display over other apps (lets the timers start)", v -> startActivity(
+                new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()))));
+        f.addView(ov);
 
         f.addView(head("Do Not Disturb"));
         f.addView(chk("dnd", false, "turn it on around each prayer"));
@@ -341,9 +349,6 @@ public class M extends Activity {
                     .putExtra(Settings.EXTRA_CHANNEL_ID, "keep"));
         });
         sub(f, kaBtn);
-        ov = btn("allow display over other apps (lets the Clock timer start)", v -> startActivity(
-                new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()))));
-        f.addView(ov);
 
         f.addView(head("Tools"));
         f.addView(btn("refresh the times now", v -> new Thread(() -> { refresh(this); after(this); runOnUiThread(this::draw); }).start()));
@@ -367,8 +372,9 @@ public class M extends Activity {
     void gates() {
         boolean tp = on(this, "tp", true), np = on(this, "np", true), d = on(this, "dnd", false);
         en(leadRow, tp || np);
-        en(dtBox, tp);
-        en(postRow, on(this, "ti", true));
+        boolean ip = on(this, "ip", false);
+        en(dtBox, tp || ip);
+        en(postRow, ip || on(this, "ti", true) || (tp && on(this, "dt", true)));
         en(dndbRow, d);
         en(dndaRow, d);
         en(dndPerm, d);

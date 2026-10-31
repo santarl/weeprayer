@@ -26,13 +26,19 @@ public class T extends BroadcastReceiver {
             if (k == 0) { // the countdown starts
                 long left = target - now;
                 if (left >= 10000) {
-                    if (M.on(c, "tp", true)) M.timer(c, n, (int) (left / 1000), 1);
+                    if (M.on(c, "tp", true)) {
+                        M.timer(c, n, (int) (left / 1000), 1);
+                        // after the azaan it keeps counting up (on Samsung): clear it once the iqamah time is over
+                        if (M.on(c, "dt", true)) M.armDismiss(c, 2, target + M.post(c) * 60000L + 2500);
+                    }
                     if (M.on(c, "np", true))
                         M.note(c, n, (third ? "starts at " : "azaan at ") + M.fmt(c, P.hm(target)), target, true, left + 60000, M.col(p));
                 }
-            } else if (k == 1) { // the azaan: the countdown notification becomes the iqamah stopwatch, or goes away
+            } else if (k == 1) { // the azaan: the iqamah part starts (the last third has none)
+                int post = M.post(c);
+                if (!third && M.on(c, "ip", false)) M.timer(c, n + " iqamah", post * 60, 2); // optional second timer, counts down
                 if (!third && M.on(c, "ti", true))
-                    M.note(c, "Iqamah", n, target, false, target + M.post(c) * 60000L - now, M.col(p));
+                    M.note(c, "Iqamah", n, target, false, target + post * 60000L - now, M.col(p)); // replaces the countdown notification, counts up
                 else M.cancelNote(c);
             } else if (k == 6) { // Do Not Disturb on
                 M.dndOn(c, target + M.val(c, "dnda", 10, 1, 120) * 60000L);
