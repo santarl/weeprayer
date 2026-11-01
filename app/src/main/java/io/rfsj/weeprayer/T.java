@@ -42,7 +42,7 @@ public class T extends BroadcastReceiver {
                     M.note(c, "Iqamah", n, target, false, target + post * 60000L - now, M.col(p)); // replaces the countdown notification, counts up
                 else M.cancelNote(c);
             } else if (k == 6) { // Do Not Disturb on
-                M.dndOn(c, target + M.val(c, "dnda", 10, 1, 120) * 60000L);
+                M.dndOn(c, target + M.val(c, "dnda", 35, 1, 120) * 60000L);
             } else if (k == 7) { // Do Not Disturb off
                 M.dndOff(c);
             }

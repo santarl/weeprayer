@@ -184,7 +184,7 @@ public class M extends Activity {
         if (adi(c) && !fresh(c)) refresh(c); // nothing to download: new month, new lines at once
         long now = System.currentTimeMillis();
         boolean dnd = on(c, "dnd", false);
-        long b = dnd ? val(c, "dndb", 5, 1, 120) * 60000L : 0, a = dnd ? val(c, "dnda", 10, 1, 120) * 60000L : 0;
+        long b = dnd ? val(c, "dndb", 5, 1, 120) * 60000L : 0, a = dnd ? val(c, "dnda", 35, 1, 120) * 60000L : 0;
         long[] e = fresh(c) ? P.next(lines(c), afterKey, pre(c), on(c, "l3r", false), b, a) : null;
         if (e != null) arm(c, e[0], (int) e[1], e[2] == 5 ? "Last third" : P.nameAt((int) e[2], e[3]), e[3], (int) e[2]);
         else if (fresh(c)) // month finished: refresh just after midnight on the 1st
@@ -296,13 +296,13 @@ public class M extends Activity {
 
     /** Widget time: like the app's, but 12h without AM/PM and with a leading zero. */
     static String fw(Context c, String hm) {
-        if (!on(c, "h12", false)) return hm;
+        if (!on(c, "h12", true)) return hm;
         int h = Integer.parseInt(hm.substring(0, 2)) % 12;
         return (h == 0 ? "12" : h < 10 ? "0" + h : "" + h) + hm.substring(2);
     }
 
     static String fmt(Context c, String hm) {
-        if (!on(c, "h12", false)) return hm;
+        if (!on(c, "h12", true)) return hm;
         int h = Integer.parseInt(hm.substring(0, 2));
         return (h % 12 == 0 ? 12 : h % 12) + hm.substring(2) + (h < 12 ? " AM" : " PM");
     }
@@ -362,7 +362,7 @@ public class M extends Activity {
         f.addView(radios("adi", false, "Dubai (times from the data branch)", "Adirampattinam (the town's printed sheet)"));
 
         f.addView(head("Display"));
-        f.addView(radios("h12", false, "24-hour time", "12-hour time"));
+        f.addView(radios("h12", true, "24-hour time", "12-hour time"));
         f.addView(chk("l3", false, "show the last third of the night on the main screen"));
 
         f.addView(head("Countdown before the azaan"));
@@ -392,7 +392,7 @@ public class M extends Activity {
         f.addView(chk("dnd", false, "turn it on around each prayer"));
         dndbRow = num("dndb", 5, "on (min before the azaan)");
         sub(f, dndbRow);
-        dndaRow = num("dnda", 10, "off (min after the azaan)");
+        dndaRow = num("dnda", 35, "off (min after the azaan)");
         sub(f, dndaRow);
         dndPerm = btn("", v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)));
         f.addView(dndPerm);
