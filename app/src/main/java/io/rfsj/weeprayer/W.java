@@ -21,6 +21,7 @@ public class W extends AppWidgetProvider {
     @Override public void onUpdate(Context c, AppWidgetManager am, int[] ids) { all(c); }
 
     static void all(Context c) {
+        M.loc(c);
         AppWidgetManager am = AppWidgetManager.getInstance(c);
         int[] a = am.getAppWidgetIds(new ComponentName(c, W.class));
         int[] b = am.getAppWidgetIds(new ComponentName(c, N.class));

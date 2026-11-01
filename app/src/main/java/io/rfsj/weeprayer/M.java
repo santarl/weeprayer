@@ -38,6 +38,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -55,7 +56,7 @@ public class M extends Activity {
 
     TextView t, st;
     Button ov, bat, dndPerm, kaBtn;
-    View mainV, confV, leadRow, dtBox, postRow, dndbRow, dndaRow;
+    View mainV, confV, leadRow, dtBox, iqRow, dndbRow, dndaRow;
     boolean inConf;
 
     // ---------- storage ----------
@@ -69,8 +70,18 @@ public class M extends Activity {
     /** How long before the azaan the countdown starts. */
     static long pre(Context c) { return val(c, "lead", 20, 1, 180) * 60000L; }
 
-    /** How long the iqamah stopwatch stays after the azaan, in minutes. */
-    static int post(Context c) { return val(c, "post", 10, 1, 180); }
+    /** The two locations: Dubai (times from the data branch) or Adirampattinam (the town's printed sheet, built in). */
+    static boolean adi(Context c) { return on(c, "adi", false); }
+
+    /** Sets the time zone for the chosen location. Called at every entry point. */
+    static void loc(Context c) { P.Z = ZoneId.of(adi(c) ? "Asia/Kolkata" : "Asia/Dubai"); }
+
+    /** Minutes from each prayer's azaan to its iqamah (Adirampattinam: the local rule, 30 for Fajr, 20, 20, 7, 20). */
+    static final int[] IQ_ADI = {30, 20, 20, 7, 20};
+
+    static int iqDef(Context c, int i) { return adi(c) ? IQ_ADI[i] : 10; }
+
+    static int iq(Context c, int i) { return val(c, "iq" + i, iqDef(c, Math.min(i, 4)), 1, 180); }
 
     static int col(int idx) { return COL[Math.max(0, Math.min(5, idx))]; }
 
@@ -98,6 +109,15 @@ public class M extends Activity {
 
     /** Fetch the workflow's file and store this month. Records the outcome in prefs "e" (empty = ok). */
     static void refresh(Context c) {
+        loc(c);
+        if (adi(c)) { // built-in sheet: this month and next (so the day after the last one is known too)
+            YearMonth y = ym();
+            List<String> l = A.lines(y);
+            l.addAll(A.lines(y.plusMonths(1)));
+            sp(c).edit().putString("d", String.join("\n", l)).putString("m", y.toString())
+                    .putLong("f", System.currentTimeMillis()).putString("e", "").apply();
+            return;
+        }
         String err = "";
         try {
             List<String> l = P.load(get(), ym());
@@ -123,6 +143,8 @@ public class M extends Activity {
 
     /** Arms the first event after `afterKey` (an event's time*8+kind; a late alarm never loses the next one). */
     static void schedule(Context c, long afterKey) {
+        loc(c);
+        if (adi(c) && !fresh(c)) refresh(c); // nothing to download: new month, new lines at once
         long now = System.currentTimeMillis();
         boolean dnd = on(c, "dnd", false);
         long b = dnd ? val(c, "dndb", 5, 1, 120) * 60000L : 0, a = dnd ? val(c, "dnda", 10, 1, 120) * 60000L : 0;
@@ -251,6 +273,7 @@ public class M extends Activity {
     // ---------- UI ----------
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        loc(this);
         getWindow().setStatusBarColor(0xFF000000);
         getWindow().setNavigationBarColor(0xFF000000);
 
@@ -295,6 +318,9 @@ public class M extends Activity {
         f.setPadding(48, 120, 48, 96);
         f.addView(btn("< back", v -> back()));
 
+        f.addView(head("Location"));
+        f.addView(radios("adi", false, "Dubai (times from the data branch)", "Adirampattinam (the town's printed sheet)"));
+
         f.addView(head("Display"));
         f.addView(radios("h12", false, "24-hour time", "12-hour time"));
         f.addView(chk("l3", false, "show the last third of the night on the main screen"));
@@ -309,8 +335,8 @@ public class M extends Activity {
 
         f.addView(head("Iqamah (after the azaan)"));
         f.addView(hint("Starts at the azaan. On Samsung the countdown timer just keeps counting up after it ends, so no extra timer is needed."));
-        postRow = num("post", 10, "lasts (min after the azaan)");
-        f.addView(postRow);
+        iqRow = iqBox();
+        f.addView(iqRow);
         f.addView(chk("ti", true, "a notification counting up from the azaan (stopwatch)"));
         f.addView(chk("ip", false, "a second Clock timer counting down to the iqamah (for Clock apps that don't count up)"));
 
@@ -374,7 +400,7 @@ public class M extends Activity {
         en(leadRow, tp || np);
         boolean ip = on(this, "ip", false);
         en(dtBox, tp || ip);
-        en(postRow, ip || on(this, "ti", true) || (tp && on(this, "dt", true)));
+        en(iqRow, ip || on(this, "ti", true) || (tp && on(this, "dt", true)));
         en(dndbRow, d);
         en(dndaRow, d);
         en(dndPerm, d);
@@ -430,8 +456,29 @@ public class M extends Activity {
             g.addView(r);
         }
         (on(this, key, def) ? b : a).setChecked(true);
-        g.setOnCheckedChangeListener((grp, id) -> { sp(this).edit().putBoolean(key, id == b.getId()).apply(); W.all(this); });
+        g.setOnCheckedChangeListener((grp, id) -> {
+            sp(this).edit().putBoolean(key, id == b.getId()).apply();
+            if (key.equals("adi")) { // another location: forget the old times, load the new ones, rebuild this screen
+                sp(this).edit().remove("m").remove("d").putString("e", "").apply();
+                loc(this);
+                new Thread(() -> {
+                    refresh(this);
+                    after(this);
+                    runOnUiThread(() -> { confV = config(); setContentView(confV); draw(); });
+                }).start();
+            }
+            W.all(this);
+        });
         return g;
+    }
+
+    /** The iqamah minutes, one per prayer. */
+    LinearLayout iqBox() {
+        LinearLayout b = new LinearLayout(this);
+        b.setOrientation(LinearLayout.VERTICAL);
+        String[] n = {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"};
+        for (int i = 0; i < 5; i++) b.addView(num("iq" + i, iqDef(this, i), n[i] + ": iqamah (min after the azaan)"));
+        return b;
     }
 
     /** A number setting. */

@@ -13,6 +13,7 @@ public class S extends Service {
     @Override public IBinder onBind(Intent i) { return null; }
 
     @Override public int onStartCommand(Intent i, int flags, int id) {
+        M.loc(this);
         M.keepChannel(this);
         Notification.Builder b = new Notification.Builder(this, "keep")
                 .setSmallIcon(R.drawable.ic_stat)

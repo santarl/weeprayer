@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 /** Pure logic (no Android classes): read the monthly table, find the next event. */
 final class P {
     static final String[] N = {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"};
-    static final ZoneId Z = ZoneId.of("Asia/Dubai");
+    static ZoneId Z = ZoneId.of("Asia/Dubai"); // follows the chosen location, see M.loc
 
 
     private static final Pattern LINE = Pattern.compile("\\d{4}-\\d{2}-\\d{2}(,\\d{2}:\\d{2}){5}");

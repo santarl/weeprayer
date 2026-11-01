@@ -6,6 +6,7 @@ import android.content.Intent;
 
 public class T extends BroadcastReceiver {
     @Override public void onReceive(final Context c, Intent i) {
+        M.loc(c);
         String a = i.getAction();
         if (M.DISMISS.equals(a)) { M.dismissTimers(c); return; }
         long key = 0; // the event just handled: the next alarm is the first one after it, even if this one was late
@@ -29,13 +30,13 @@ public class T extends BroadcastReceiver {
                     if (M.on(c, "tp", true)) {
                         M.timer(c, n, (int) (left / 1000), 1);
                         // after the azaan it keeps counting up (on Samsung): clear it once the iqamah time is over
-                        if (M.on(c, "dt", true)) M.armDismiss(c, 2, target + M.post(c) * 60000L + 2500);
+                        if (M.on(c, "dt", true)) M.armDismiss(c, 2, target + (third ? 10 : M.iq(c, p)) * 60000L + 2500);
                     }
                     if (M.on(c, "np", true))
                         M.note(c, n, (third ? "starts at " : "azaan at ") + M.fmt(c, P.hm(target)), target, true, left + 60000, M.col(p));
                 }
             } else if (k == 1) { // the azaan: the iqamah part starts (the last third has none)
-                int post = M.post(c);
+                int post = M.iq(c, p); // minutes to this prayer's iqamah
                 if (!third && M.on(c, "ip", false)) M.timer(c, n + " iqamah", post * 60, 2); // optional second timer, counts down
                 if (!third && M.on(c, "ti", true))
                     M.note(c, "Iqamah", n, target, false, target + post * 60000L - now, M.col(p)); // replaces the countdown notification, counts up
