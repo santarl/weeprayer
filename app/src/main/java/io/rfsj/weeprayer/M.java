@@ -47,6 +47,9 @@ import java.util.List;
 public class M extends Activity {
     // published by the "times" workflow (see scripts/scrape.py); the repo must be public
     static final String URL = "https://raw.githubusercontent.com/santarl/weeprayer/data/dubai.txt";
+    // used only when the data branch has not got this month yet
+    static final String KT = "https://www.khaleejtimes.com/prayer-time-uae/dubai";
+    static final String UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36";
     static final String EVT = "io.rfsj.weeprayer.EVT";
     static final String DISMISS = "io.rfsj.weeprayer.DISMISS";
     static final int NOTE = 100; // the countdown / iqamah notification (one, replaced in place)
@@ -95,10 +98,11 @@ public class M extends Activity {
     static boolean fresh(Context c) { return sp(c).getString("m", "").equals(ym().toString()); }
 
     // ---------- network ----------
-    static String get() throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(URL).openConnection();
+    static String get(String u) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection();
         c.setConnectTimeout(4000);
         c.setReadTimeout(5000);
+        c.setRequestProperty("User-Agent", UA);
         try (InputStream in = c.getInputStream(); ByteArrayOutputStream o = new ByteArrayOutputStream()) {
             byte[] b = new byte[8192];
             int n;
@@ -115,17 +119,25 @@ public class M extends Activity {
             List<String> l = A.lines(y);
             l.addAll(A.lines(y.plusMonths(1)));
             sp(c).edit().putString("d", String.join("\n", l)).putString("m", y.toString())
-                    .putLong("f", System.currentTimeMillis()).putString("e", "").apply();
+                    .putLong("f", System.currentTimeMillis()).putString("e", "").putString("w", "").apply();
             return;
         }
-        String err = "";
+        String why = "", err = "", note = "";
+        List<String> l = null;
         try {
-            List<String> l = P.load(get(), ym());
-            if (l == null) err = "no data for " + ym() + " yet";
-            else sp(c).edit().putString("d", String.join("\n", l)).putString("m", ym().toString())
-                    .putLong("f", System.currentTimeMillis()).apply();
-        } catch (Exception e) { err = e.toString(); }
-        sp(c).edit().putString("e", err).apply();
+            l = P.load(get(URL), ym());
+            if (l == null) why = "the data branch has no " + ym() + " yet";
+        } catch (Exception e) { why = "data branch: " + e; }
+        if (l == null) { // the data branch is behind or unreachable: read Khaleej Times' page directly
+            try {
+                l = P.parse(get(KT), ym());
+                if (l == null) err = why + "; Khaleej Times did not parse";
+                else note = "using Khaleej Times directly (the data branch is behind)";
+            } catch (Exception e) { err = why + "; Khaleej Times: " + e; }
+        }
+        SharedPreferences.Editor ed = sp(c).edit().putString("e", err).putString("w", note);
+        if (l != null) ed.putString("d", String.join("\n", l)).putString("m", ym().toString()).putLong("f", System.currentTimeMillis());
+        ed.apply();
     }
 
     // ---------- scheduling: one alarm at a time, each firing sets the next ----------
@@ -568,8 +580,9 @@ public class M extends Activity {
         t.setText(s.toString().replaceAll("\\s+$", ""));
         SharedPreferences p = sp(this);
         String e = p.getString("e", ""), te = p.getString("te", "");
-        st.setText((e.isEmpty() ? "" : "fetch: " + e + "\n") + te);
-        st.setVisibility(e.isEmpty() && te.isEmpty() ? View.GONE : View.VISIBLE);
+        String wn = p.getString("w", "");
+        st.setText((e.isEmpty() ? "" : "fetch: " + e + "\n") + (wn.isEmpty() ? "" : wn + "\n") + te);
+        st.setVisibility(e.isEmpty() && te.isEmpty() && wn.isEmpty() ? View.GONE : View.VISIBLE);
         bat.setText(ignoring() ? "battery: unoptimized (tap to review)" : "set battery to unoptimized");
         dndPerm.setText(getSystemService(NotificationManager.class).isNotificationPolicyAccessGranted()
                 ? "Do Not Disturb access: allowed (tap to review)" : "allow Do Not Disturb access");
