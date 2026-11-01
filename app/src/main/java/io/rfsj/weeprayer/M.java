@@ -52,6 +52,7 @@ public class M extends Activity {
     static final String UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36";
     static final String EVT = "io.rfsj.weeprayer.EVT";
     static final String DISMISS = "io.rfsj.weeprayer.DISMISS";
+    static final int DEV = 201; // developer-only: "check the workflow"
     static final int NOTE = 100; // the countdown / iqamah notification (one, replaced in place)
 
     /** One colour per prayer (Fajr, Dhuhr/Jumu'ah, Asr, Maghrib, Isha) and for the last third of the night. */
@@ -138,6 +139,30 @@ public class M extends Activity {
         SharedPreferences.Editor ed = sp(c).edit().putString("e", err).putString("w", note);
         if (l != null) ed.putString("d", String.join("\n", l)).putString("m", ym().toString()).putLong("f", System.currentTimeMillis());
         ed.apply();
+        devCheck(c, err, note.isEmpty() ? "" : why);
+    }
+
+    /** Developer mode: the name field says "Atef" (any case). */
+    static boolean dev(Context c) { return "atef".equalsIgnoreCase(sp(c).getString("name", "").trim()); }
+
+    /**
+     * Developer mode only: a notification when the times could not be fetched at all, or only came from the
+     * Khaleej Times fallback, so the workflow gets checked. Cleared again by the next clean fetch.
+     */
+    static void devCheck(Context c, String err, String behind) {
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (!dev(c) || (err.isEmpty() && behind.isEmpty())) { nm.cancel(DEV); return; }
+        nm.createNotificationChannel(new NotificationChannel("dev", "Developer", NotificationManager.IMPORTANCE_DEFAULT));
+        String title = err.isEmpty() ? "Check the workflow: the data branch is behind" : "Prayer times: could not fetch";
+        String text = err.isEmpty() ? behind + ". Using Khaleej Times directly." : err;
+        nm.notify(DEV, new Notification.Builder(c, "dev")
+                .setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
+                .setAutoCancel(true)
+                .setContentIntent(PendingIntent.getActivity(c, 0, new Intent(c, M.class), PendingIntent.FLAG_IMMUTABLE))
+                .build());
     }
 
     // ---------- scheduling: one alarm at a time, each firing sets the next ----------
@@ -330,6 +355,9 @@ public class M extends Activity {
         f.setPadding(48, 120, 48, 96);
         f.addView(btn("< back", v -> back()));
 
+        f.addView(head("You"));
+        f.addView(txt("name", "Name"));
+
         f.addView(head("Location"));
         f.addView(radios("adi", false, "Dubai (times from the data branch)", "Adirampattinam (the town's printed sheet)"));
 
@@ -484,6 +512,25 @@ public class M extends Activity {
         return g;
     }
 
+    /** A text setting. */
+    EditText txt(final String key, String hint) {
+        EditText e = new EditText(this);
+        e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        e.setHint(hint);
+        e.setHintTextColor(0xFF666666);
+        e.setTextColor(0xFFFFFFFF);
+        e.setText(sp(this).getString(key, ""));
+        e.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int n) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int n) {}
+            @Override public void afterTextChanged(Editable s) {
+                sp(M.this).edit().putString(key, s.toString().trim()).apply();
+                if (dev(M.this)) askNotif(); // developer notifications need the permission
+            }
+        });
+        return e;
+    }
+
     /** The iqamah minutes, one per prayer. */
     LinearLayout iqBox() {
         LinearLayout b = new LinearLayout(this);
@@ -581,8 +628,11 @@ public class M extends Activity {
         SharedPreferences p = sp(this);
         String e = p.getString("e", ""), te = p.getString("te", "");
         String wn = p.getString("w", "");
-        st.setText((e.isEmpty() ? "" : "fetch: " + e + "\n") + (wn.isEmpty() ? "" : wn + "\n") + te);
-        st.setVisibility(e.isEmpty() && te.isEmpty() && wn.isEmpty() ? View.GONE : View.VISIBLE);
+        // the Clock can only be started from the background with "display over other apps"; Android blocks it silently otherwise
+        String bl = on(this, "tp", true) && !Settings.canDrawOverlays(this) ? "Clock timer blocked: allow display over other apps in config" : "";
+        String all = ((e.isEmpty() ? "" : "fetch: " + e + "\n") + (wn.isEmpty() ? "" : wn + "\n") + (bl.isEmpty() ? "" : bl + "\n") + te).trim();
+        st.setText(all);
+        st.setVisibility(all.isEmpty() ? View.GONE : View.VISIBLE);
         bat.setText(ignoring() ? "battery: unoptimized (tap to review)" : "set battery to unoptimized");
         dndPerm.setText(getSystemService(NotificationManager.class).isNotificationPolicyAccessGranted()
                 ? "Do Not Disturb access: allowed (tap to review)" : "allow Do Not Disturb access");
