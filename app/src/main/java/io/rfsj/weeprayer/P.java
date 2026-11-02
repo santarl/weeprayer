@@ -154,6 +154,45 @@ final class P {
         return m + (f - m) * 2 / 3;
     }
 
+    /** Countdown without seconds: "1h 12m", "12m", "<1m". */
+    static String leftMin(long ms) {
+        long m = Math.max(0, ms / 60000);
+        return m < 1 ? "<1m" : m < 60 ? m + "m" : m / 60 + "h " + m % 60 + "m";
+    }
+
+    /** Text size (sp) for a widget list line, "> Maghrib  5:42 PM" being 18 monospace characters, so it fits the width. */
+    static float lineSize(int wDp) { return Math.max(8f, Math.min(14f, Math.max(20, wDp - 16) / 10.8f)); }
+
+    /** For a widget w x h dp: {prayers shown, text lines that fit}. A list needs about 130 dp of width; narrower ones are a card. */
+    static int[] fit(int wDp, int hDp, boolean countdown) {
+        int lines = Math.max(1, (int) ((hDp - 16) / (lineSize(wDp) * 1.3f)));
+        return new int[]{wDp >= 130 ? count(lines, countdown) : 1, lines};
+    }
+
+    /** How many prayers a widget with this many text lines shows: one up to 3 lines, then 2, 3, 4 and all 5 (a countdown takes a line). */
+    static int count(int lines, boolean countdown) { return lines < 4 ? 1 : Math.min(5, lines - (countdown ? 2 : 1)); }
+
+    /**
+     * What a widget shows, as {name, "HH:mm", target millis, "1" if it is the next prayer}.
+     * n < 5: the next prayer and the ones after it, rolling into tomorrow. n >= 5: all five of today, then tomorrow's
+     * Fajr once Isha has passed. Empty only if today is unknown.
+     */
+    static List<String[]> upcoming(List<String> lines, long now, int n) {
+        LocalDate d = Instant.ofEpochMilli(now).atZone(Z).toLocalDate();
+        String[] r = row(lines, d), t = row(lines, d.plusDays(1));
+        List<String[]> out = new ArrayList<>();
+        if (r == null) return out;
+        List<String[]> seq = new ArrayList<>(); // today's five, then tomorrow's five (if stored)
+        for (int i = 0; i < 5; i++) seq.add(new String[]{name(i, d), r[i + 1], "" + at(d, r[i + 1])});
+        if (t != null) for (int i = 0; i < 5; i++) seq.add(new String[]{name(i, d.plusDays(1)), t[i + 1], "" + at(d.plusDays(1), t[i + 1])});
+        int nx = 5;
+        for (int i = 4; i >= 0; i--) if (at(d, r[i + 1]) > now) nx = i;
+        int from = n >= 5 ? 0 : nx, to = n >= 5 ? Math.min(seq.size(), nx == 5 ? 6 : 5) : Math.min(seq.size(), nx + n);
+        for (int k = from; k < to; k++) out.add(new String[]{seq.get(k)[0], seq.get(k)[1], seq.get(k)[2], k == nx ? "1" : "0"});
+        if (out.isEmpty()) out.add(new String[]{seq.get(4)[0], seq.get(4)[1], seq.get(4)[2], "0"}); // after Isha on the last stored day
+        return out;
+    }
+
     /** Orders events: by time, then kind (so two events at the same time are both handled, in order). */
     static long key(long time, int kind) { return time * 8 + kind; }
 

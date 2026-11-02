@@ -9,6 +9,7 @@ public class T extends BroadcastReceiver {
         M.loc(c);
         String a = i.getAction();
         if (M.DISMISS.equals(a)) { M.dismissTimers(c); return; }
+        if (M.MINUTE.equals(a)) { W.render(c); return; } // narrow widgets: redraw the minutes
         long key = 0; // the event just handled: the next alarm is the first one after it, even if this one was late
         if (M.EVT.equals(a)) {
             int k = i.getIntExtra("k", 2);

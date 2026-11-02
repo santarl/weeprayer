@@ -6,91 +6,112 @@ import android.appwidget.AppWidgetProvider;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
+import android.os.Bundle;
 import android.os.SystemClock;
-import android.view.View;
+import android.util.TypedValue;
 import android.widget.RemoteViews;
 
-import java.time.Instant;
-import java.time.LocalDate;
 import java.util.List;
+import java.util.Locale;
 
-/** Five-column widget; also holds the update code for both widgets (the compact one is N). */
+/**
+ * One free-size widget in the app's own text style. What it shows depends on its size: a card (name, time, countdown)
+ * for the small ones, then the next 2, 3, 4 and finally all 5 prayers as in the app. A countdown with seconds is a
+ * Chronometer that the system ticks by itself and needs about 2 cells of width; narrower ones show minutes only,
+ * redrawn once a minute (see M.minute).
+ */
 public class W extends AppWidgetProvider {
-    static final int[] IC = {R.drawable.i_fajr, R.drawable.i_dhuhr, R.drawable.i_asr, R.drawable.i_maghrib, R.drawable.i_isha};
-
     @Override public void onUpdate(Context c, AppWidgetManager am, int[] ids) { all(c); }
 
-    static void all(Context c) {
+    @Override public void onAppWidgetOptionsChanged(Context c, AppWidgetManager am, int id, Bundle o) { all(c); }
+
+    @Override public void onDisabled(Context c) { M.minute(c, false); }
+
+    /** Redraws every widget and keeps the once-a-minute redraw on only while one of them needs it. */
+    static void all(Context c) { M.minute(c, render(c)); }
+
+    /** Draws every widget; true if one of them shows minutes only. */
+    static boolean render(Context c) {
         M.loc(c);
         AppWidgetManager am = AppWidgetManager.getInstance(c);
-        int[] a = am.getAppWidgetIds(new ComponentName(c, W.class));
-        int[] b = am.getAppWidgetIds(new ComponentName(c, N.class));
-        if (a.length + b.length == 0) return;
+        int[] ids = am.getAppWidgetIds(new ComponentName(c, W.class));
+        if (ids.length == 0) return false;
         long now = System.currentTimeMillis();
         List<String> l = M.lines(c);
-        LocalDate d = Instant.ofEpochMilli(now).atZone(P.Z).toLocalDate();
-        String[] r = P.row(l, d);
-        long[] s = P.state(l, now);
-        long q = M.on(c, "wl3", false) ? P.lastThird(l, now) : 0;
-        PendingIntent open = PendingIntent.getActivity(c, 0, new Intent(c, M.class), PendingIntent.FLAG_IMMUTABLE);
-        if (a.length > 0) am.updateAppWidget(a, row(c, r, d, s, q, now, open));
-        if (b.length > 0) am.updateAppWidget(b, next(c, s, q, now, open));
+        boolean port = c.getResources().getConfiguration().orientation != Configuration.ORIENTATION_LANDSCAPE;
+        boolean minute = false;
+        for (int id : ids) {
+            Bundle o = am.getAppWidgetOptions(id);
+            int w = o.getInt(port ? AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH : AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0);
+            int h = o.getInt(port ? AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT : AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0);
+            boolean[] m = new boolean[1];
+            am.updateAppWidget(id, view(c, l, now, w > 0 ? w : 110, h > 0 ? h : 60, m));
+            minute |= m[0];
+        }
+        return minute;
     }
 
-    static RemoteViews row(Context c, String[] r, LocalDate d, long[] s, long q, long now, PendingIntent open) {
-        RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.w_row);
-        v.setOnClickPendingIntent(R.id.root, open);
-        v.removeAllViews(R.id.row);
-        if (r == null || s == null) {
-            v.setViewVisibility(R.id.ft, View.VISIBLE);
-            v.setTextViewText(R.id.fl, "open the app to load the times");
-            v.setViewVisibility(R.id.cd, View.GONE);
-            v.setViewVisibility(R.id.f3, View.GONE);
+    static RemoteViews view(Context c, List<String> l, long now, int w, int h, boolean[] minute) {
+        String pkg = c.getPackageName();
+        RemoteViews v = new RemoteViews(pkg, R.layout.w_root);
+        v.setOnClickPendingIntent(R.id.root, PendingIntent.getActivity(c, 0, new Intent(c, M.class), PendingIntent.FLAG_IMMUTABLE));
+        v.removeAllViews(R.id.rows);
+        boolean cd = M.on(c, "wcd", true), secs = w >= 110;
+        float avail = Math.max(20, w - 16);
+        int[] fit = P.fit(w, h, cd);
+        int lines = fit[1];
+        List<String[]> e = P.upcoming(l, now, fit[0]);
+        if (e.isEmpty()) {
+            text(v, pkg, R.layout.w_tc, "open the app to load the times", Math.max(8f, Math.min(12f, avail / 18f)));
             return v;
         }
-        for (int i = 0; i < 5; i++) {
-            RemoteViews k = new RemoteViews(c.getPackageName(), R.layout.w_col);
-            k.setImageViewResource(R.id.ic, IC[i]);
-            k.setTextViewText(R.id.nm, P.name(i, d));
-            k.setTextViewText(R.id.tm, M.fw(c, r[i + 1]));
-            if (i == s[0]) k.setInt(R.id.col, "setBackgroundResource", R.drawable.w_hi);
-            v.addView(R.id.row, k);
+        if (e.size() == 1) { // a card: name, time, countdown
+            String[] x = e.get(0);
+            long t = Long.parseLong(x[2]);
+            boolean next = cd && x[3].equals("1");
+            String time = M.fmt(c, x[1]);
+            int rows = lines >= 3 ? (next ? 3 : 2) : (next ? 2 : 1);
+            float sz = Math.max(8f, Math.min(18f, Math.min(avail / 5.6f, (h - 16) / (rows * 1.3f))));
+            if (lines >= 3) {
+                text(v, pkg, R.layout.w_big, x[0], sz);
+                text(v, pkg, R.layout.w_tc, time, sz);
+            } else text(v, pkg, R.layout.w_big, x[0] + " " + time, sz);
+            if (next) {
+                if (secs) chrono(v, pkg, R.layout.w_cc, t, now, sz);
+                else {
+                    text(v, pkg, R.layout.w_tc, "(" + P.leftMin(t - now) + ")", sz);
+                    minute[0] = true;
+                }
+            }
+            return v;
         }
-        boolean cd = M.on(c, "wcd", true) && s[1] >= 0;
-        v.setViewVisibility(R.id.ft, cd || q != 0 ? View.VISIBLE : View.GONE);
-        v.setViewVisibility(R.id.fl, cd ? View.VISIBLE : View.GONE);
-        v.setViewVisibility(R.id.cd, cd ? View.VISIBLE : View.GONE);
-        v.setViewVisibility(R.id.f3, q != 0 ? View.VISIBLE : View.GONE);
-        if (cd) {
-            v.setTextViewText(R.id.fl, P.nameAt((int) s[1], s[2]) + " in ");
-            clock(v, R.id.cd, s[2], now);
+        float sz = P.lineSize(w); // a list as in the app: the next prayer is marked, its countdown right-aligned under it
+        for (String[] x : e) {
+            boolean next = x[3].equals("1");
+            text(v, pkg, R.layout.w_t, String.format(Locale.ROOT, "%s%-8s%8s", next ? "> " : "  ", x[0], M.fmt(c, x[1])), sz);
+            if (next && cd) chrono(v, pkg, R.layout.w_c, Long.parseLong(x[2]), now, sz);
         }
-        if (q != 0) v.setTextViewText(R.id.f3, (cd ? "    " : "") + "Last 1/3 " + M.fw(c, P.hm(q)));
+        if (M.on(c, "wl3", false) && lines >= e.size() + (cd ? 1 : 0) + 1) {
+            long q = P.lastThird(l, now);
+            if (q != 0) text(v, pkg, R.layout.w_t, String.format(Locale.ROOT, "  %-8s%8s", "Last 1/3", M.fmt(c, P.hm(q))), sz);
+        }
         return v;
     }
 
-    static RemoteViews next(Context c, long[] s, long q, long now, PendingIntent open) {
-        RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.w_next);
-        v.setOnClickPendingIntent(R.id.root, open);
-        if (s == null || s[1] < 0) {
-            v.setTextViewText(R.id.nm, "open the app");
-            v.setViewVisibility(R.id.cd, View.GONE);
-            v.setViewVisibility(R.id.f3, View.GONE);
-            return v;
-        }
-        int i = (int) s[1];
-        v.setImageViewResource(R.id.ic, IC[i]);
-        v.setTextViewText(R.id.nm, P.nameAt(i, s[2]) + "  " + M.fw(c, P.hm(s[2])));
-        v.setViewVisibility(R.id.cd, View.VISIBLE);
-        clock(v, R.id.cd, s[2], now);
-        v.setViewVisibility(R.id.f3, q != 0 ? View.VISIBLE : View.GONE);
-        if (q != 0) v.setTextViewText(R.id.f3, "Last 1/3 " + M.fw(c, P.hm(q)));
-        return v;
+    private static void text(RemoteViews v, String pkg, int layout, String s, float sz) {
+        RemoteViews r = new RemoteViews(pkg, layout);
+        r.setTextViewText(R.id.tx, s);
+        r.setTextViewTextSize(R.id.tx, TypedValue.COMPLEX_UNIT_SP, sz);
+        v.addView(R.id.rows, r);
     }
 
-    /** Self-ticking countdown (shows seconds) that needs no updates from us. */
-    static void clock(RemoteViews v, int id, long target, long now) {
-        v.setChronometer(id, SystemClock.elapsedRealtime() + (target - now), null, true);
-        v.setChronometerCountDown(id, true);
+    /** "(1:12:05)", ticking down by itself in the launcher: nothing has to be re-posted every second. */
+    private static void chrono(RemoteViews v, String pkg, int layout, long t, long now, float sz) {
+        RemoteViews r = new RemoteViews(pkg, layout);
+        r.setChronometer(R.id.ch, SystemClock.elapsedRealtime() + (t - now), "(%s)", true);
+        r.setChronometerCountDown(R.id.ch, true);
+        r.setTextViewTextSize(R.id.ch, TypedValue.COMPLEX_UNIT_SP, sz);
+        v.addView(R.id.rows, r);
     }
 }

@@ -52,6 +52,7 @@ public class M extends Activity {
     static final String UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36";
     static final String EVT = "io.rfsj.weeprayer.EVT";
     static final String DISMISS = "io.rfsj.weeprayer.DISMISS";
+    static final String MINUTE = "io.rfsj.weeprayer.MINUTE";
     static final int DEV = 201; // developer-only: "check the workflow"
     static final int NOTE = 100; // the countdown / iqamah notification (one, replaced in place)
 
@@ -192,6 +193,18 @@ public class M extends Activity {
         else arm(c, now + 3600_000L, 2, "", 0, 0); // no data for this month: try again in an hour
     }
 
+    /**
+     * A redraw once a minute for the narrow widgets that show minutes only (wide ones tick by themselves); off when
+     * no widget needs it. A plain repeating alarm that does not wake the phone.
+     */
+    static void minute(Context c, boolean on) {
+        AlarmManager am = c.getSystemService(AlarmManager.class);
+        PendingIntent pi = PendingIntent.getBroadcast(c, 3, new Intent(c, T.class).setAction(MINUTE),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        if (on) am.setRepeating(AlarmManager.RTC, (System.currentTimeMillis() / 60000 + 1) * 60000, 60000, pi);
+        else am.cancel(pi);
+    }
+
     /** After anything changed: next alarm, Do Not Disturb safety check, widgets, keep-alive. */
     static void after(Context c, long afterKey) {
         schedule(c, afterKey);
@@ -294,13 +307,6 @@ public class M extends Activity {
         p.edit().putBoolean("dndon", false).apply();
     }
 
-    /** Widget time: like the app's, but 12h without AM/PM and with a leading zero. */
-    static String fw(Context c, String hm) {
-        if (!on(c, "h12", true)) return hm;
-        int h = Integer.parseInt(hm.substring(0, 2)) % 12;
-        return (h == 0 ? "12" : h < 10 ? "0" + h : "" + h) + hm.substring(2);
-    }
-
     static String fmt(Context c, String hm) {
         if (!on(c, "h12", true)) return hm;
         int h = Integer.parseInt(hm.substring(0, 2));
@@ -398,9 +404,9 @@ public class M extends Activity {
         f.addView(dndPerm);
 
         f.addView(head("Widget"));
-        f.addView(hint("Uses the time format above."));
+        f.addView(hint("Resize it: a small one shows the next prayer, bigger ones the next 2, 3, 4 and all 5. Uses the time format above."));
         f.addView(chk("wcd", true, "show the countdown to the next prayer"));
-        f.addView(chk("wl3", false, "show the last third of the night"));
+        f.addView(chk("wl3", false, "show the last third of the night (when there is room)"));
 
         f.addView(head("Keeping it running"));
         bat = btn("", v -> startActivity(ignoring()
